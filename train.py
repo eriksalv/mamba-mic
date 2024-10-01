@@ -13,8 +13,7 @@ def train():
         data_module.prepare_data()
     data_module.setup()
 
-    loss_func = DiceCELoss(sigmoid=True, squared_pred=True)
-    model = UNetModel(lr=0.001, loss_func=loss_func, spatial_dims=3, in_channels=4,
+    model = UNetModel(lr=0.001, spatial_dims=3, in_channels=4,
                       out_channels=3)
 
     wandb_logger = pl.loggers.WandbLogger(
@@ -34,5 +33,6 @@ def train():
 if __name__ == '__main__':
     # TODO: add cli arg to run wandb experiment or not
     wandb.login()
+    wandb.init(job_type='train')
     train()
     wandb.finish()

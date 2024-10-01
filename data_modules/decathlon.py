@@ -8,13 +8,13 @@ from monai.transforms import (
     ScaleIntensityd,
     Orientationd,
     CenterSpatialCropd,
-    ToTensord,
     RandSpatialCropd,
     RandFlipd,
     RandScaleIntensityd,
     RandShiftIntensityd,
-    NormalizeIntensityd,
-    MapTransform
+    MapTransform,
+    Activations,
+    AsDiscrete
 )
 from torch.utils.data import DataLoader
 import torch
@@ -47,6 +47,10 @@ class DecathlonDataModule(pl.LightningDataModule):
             RandFlipd(keys=["image", "label"], prob=0.5, spatial_axis=2),
             RandScaleIntensityd(keys="image", factors=0.1, prob=1.0),
             RandShiftIntensityd(keys="image", offsets=0.1, prob=1.0),
+        ])
+        self.post_trans = Compose([
+            Activations(sigmoid=True),
+            AsDiscrete(threshold=0.5)
         ])
 
         self.train_set = None

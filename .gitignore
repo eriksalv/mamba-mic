@@ -3,3 +3,4 @@ data
 .venv
 wandb
 checkpoints
+artifacts
