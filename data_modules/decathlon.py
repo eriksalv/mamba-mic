@@ -1,6 +1,5 @@
 import lightning.pytorch as pl
 from monai.apps.datasets import DecathlonDataset
-from monai.transforms.compose import Compose
 from monai.transforms import (
     Compose,
     LoadImaged,
@@ -14,44 +13,54 @@ from monai.transforms import (
     RandShiftIntensityd,
     MapTransform,
     Activations,
-    AsDiscrete
+    AsDiscrete,
 )
 from torch.utils.data import DataLoader
 import torch
 
 
 class DecathlonDataModule(pl.LightningDataModule):
-    def __init__(self, batch_size: int, data_dir='./data', task='Task01_BrainTumour', val_frac=0.2):
+    def __init__(
+        self,
+        batch_size: int,
+        data_dir="./data",
+        task="Task01_BrainTumour",
+        val_frac=0.2,
+    ):
         super().__init__()
         self.data_dir = data_dir
         self.batch_size = batch_size
         self.task = task
         self.val_frac = val_frac
 
-        self.preprocess = Compose([
-            LoadImaged(keys=["image", "label"]),
-            EnsureChannelFirstd(keys=["image", "label"]),
-            ConvertToMultiChannelBasedOnBratsClassesd(keys="label"),
-            Orientationd(keys=["image", "label"], axcodes="RAS"),
-            # All images are not guaranteed to have same height, width, and slices, so need to crop or pad
-            CenterSpatialCropd(keys=["image", "label"],
-                               roi_size=[240, 240, 152]),  # Unet requires multiple of 8 for spatial dims
-            ScaleIntensityd(keys="image", minv=0, maxv=1, channel_wise=True),
-        ])
-        self.augment = Compose([
-            RandSpatialCropd(
-                keys=["image", "label"], roi_size=[224, 224, 144], random_size=False
-            ),
-            RandFlipd(keys=["image", "label"], prob=0.5, spatial_axis=0),
-            RandFlipd(keys=["image", "label"], prob=0.5, spatial_axis=1),
-            RandFlipd(keys=["image", "label"], prob=0.5, spatial_axis=2),
-            RandScaleIntensityd(keys="image", factors=0.1, prob=1.0),
-            RandShiftIntensityd(keys="image", offsets=0.1, prob=1.0),
-        ])
-        self.post_trans = Compose([
-            Activations(sigmoid=True),
-            AsDiscrete(threshold=0.5)
-        ])
+        self.preprocess = Compose(
+            [
+                LoadImaged(keys=["image", "label"]),
+                EnsureChannelFirstd(keys=["image", "label"]),
+                ConvertToMultiChannelBasedOnBratsClassesd(keys="label"),
+                Orientationd(keys=["image", "label"], axcodes="RAS"),
+                # All images are not guaranteed to have same height, width, and slices, so need to crop or pad
+                CenterSpatialCropd(
+                    keys=["image", "label"], roi_size=[240, 240, 152]
+                ),  # Unet requires multiple of 8 for spatial dims
+                ScaleIntensityd(keys="image", minv=0, maxv=1, channel_wise=True),
+            ]
+        )
+        self.augment = Compose(
+            [
+                RandSpatialCropd(
+                    keys=["image", "label"], roi_size=[224, 224, 144], random_size=False
+                ),
+                RandFlipd(keys=["image", "label"], prob=0.5, spatial_axis=0),
+                RandFlipd(keys=["image", "label"], prob=0.5, spatial_axis=1),
+                RandFlipd(keys=["image", "label"], prob=0.5, spatial_axis=2),
+                RandScaleIntensityd(keys="image", factors=0.1, prob=1.0),
+                RandShiftIntensityd(keys="image", offsets=0.1, prob=1.0),
+            ]
+        )
+        self.post_trans = Compose(
+            [Activations(sigmoid=True), AsDiscrete(threshold=0.5)]
+        )
 
         self.train_set = None
         self.val_set = None
@@ -59,21 +68,43 @@ class DecathlonDataModule(pl.LightningDataModule):
 
     def prepare_data(self):
         # Download dataset (will download all sections, not just training)
-        DecathlonDataset(self.data_dir, task=self.task,
-                         section='training', download=True, cache_rate=0.0)
+        DecathlonDataset(
+            self.data_dir,
+            task=self.task,
+            section="training",
+            download=True,
+            cache_rate=0.0,
+        )
 
     def setup(self, stage=None):
         # Assign train/val datasets for use in dataloaders
-        if stage == 'fit' or stage is None:
+        if stage == "fit" or stage is None:
             self.train_set = DecathlonDataset(
-                self.data_dir, task=self.task, section='training', transform=Compose([self.preprocess, self.augment]), cache_rate=0.0, val_frac=self.val_frac)
+                self.data_dir,
+                task=self.task,
+                section="training",
+                transform=Compose([self.preprocess, self.augment]),
+                cache_rate=0.0,
+                val_frac=self.val_frac,
+            )
             self.val_set = DecathlonDataset(
-                self.data_dir, task=self.task, section='validation', transform=self.preprocess, cache_rate=0.0, val_frac=self.val_frac)
+                self.data_dir,
+                task=self.task,
+                section="validation",
+                transform=self.preprocess,
+                cache_rate=0.0,
+                val_frac=self.val_frac,
+            )
 
         # Assign test dataset for use in dataloader(s)
-        if stage == 'test' or stage is None:
+        if stage == "test" or stage is None:
             self.test_set = DecathlonDataset(
-                self.data_dir, task=self.task, section='test', transform=self.preprocess, cache_rate=0.0)
+                self.data_dir,
+                task=self.task,
+                section="test",
+                transform=self.preprocess,
+                cache_rate=0.0,
+            )
 
     def train_dataloader(self):
         return DataLoader(self.train_set, batch_size=self.batch_size)

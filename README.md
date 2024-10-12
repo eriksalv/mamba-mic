@@ -1,5 +1,9 @@
 # Mamba MIC project
 
+## Prerequisites
+
+- Python 3.11
+
 ## Set up environment
 
 ```shell

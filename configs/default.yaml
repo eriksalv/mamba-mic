@@ -1,0 +1,56 @@
+trainer:
+  max_epochs: 1000
+  devices: auto
+  accelerator: auto
+  # max_time: 00:12:00:00
+  precision: 16-mixed
+  log_every_n_steps: 10
+  logger:
+    class_path: lightning.pytorch.loggers.WandbLogger
+    init_args:
+      project: monai-runs
+      # name: experiment-name
+      log_model: all
+  callbacks:
+    - class_path: lightning.pytorch.callbacks.EarlyStopping
+      init_args:
+        monitor: val/loss
+        patience: 5
+        min_delta: 0.001
+        verbose: true
+        mode: min
+    - class_path: lightning.pytorch.callbacks.StochasticWeightAveraging
+      init_args:
+        swa_lrs: 0.01
+    - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+      init_args:
+        save_top_k: 3
+        monitor: val/loss
+        mode: min
+        filename: model-{epoch:02d}-{val/loss:.2f}
+    - class_path: lightning.pytorch.callbacks.LearningRateMonitor
+      init_args:
+        logging_interval: 'epoch'
+optimizer:
+  class_path: torch.optim.AdamW
+  init_args:
+    lr: 0.001
+lr_scheduler:
+  class_path: torch.optim.lr_scheduler.CosineAnnealingLR
+  init_args:
+    T_max: 50
+model:
+  class_path: models.unet.UNetModel
+  init_args:
+    unet:
+      class_path: monai.networks.nets.unet.UNet
+      init_args:
+        spatial_dims: 3
+        in_channels: 4
+        out_channels: 3
+        channels: [8, 16, 32, 64]
+        strides: [2, 2, 2]
+data:
+  class_path: data_modules.decathlon.DecathlonDataModule
+  init_args:
+    batch_size: 5
