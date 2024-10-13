@@ -1,5 +1,8 @@
+wandb:
+  project: monai-runs
+  name: example
 trainer:
-  max_epochs: 1000
+  max_epochs: 500
   devices: auto
   accelerator: auto
   # max_time: 00:12:00:00
@@ -8,8 +11,6 @@ trainer:
   logger:
     class_path: lightning.pytorch.loggers.WandbLogger
     init_args:
-      project: monai-runs
-      # name: experiment-name
       log_model: all
   callbacks:
     - class_path: lightning.pytorch.callbacks.EarlyStopping
@@ -19,9 +20,6 @@ trainer:
         min_delta: 0.001
         verbose: true
         mode: min
-    - class_path: lightning.pytorch.callbacks.StochasticWeightAveraging
-      init_args:
-        swa_lrs: 0.01
     - class_path: lightning.pytorch.callbacks.ModelCheckpoint
       init_args:
         save_top_k: 3
@@ -38,11 +36,11 @@ optimizer:
 lr_scheduler:
   class_path: torch.optim.lr_scheduler.CosineAnnealingLR
   init_args:
-    T_max: 50
+    T_max: 25
 model:
-  class_path: models.unet.UNetModel
+  class_path: system.System
   init_args:
-    unet:
+    net:
       class_path: monai.networks.nets.unet.UNet
       init_args:
         spatial_dims: 3
@@ -53,4 +51,4 @@ model:
 data:
   class_path: data_modules.decathlon.DecathlonDataModule
   init_args:
-    batch_size: 5
+    batch_size: 4

@@ -12,9 +12,25 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-## Train UNet on Decathlon BraTS dataset
+## Training
 
-`python train.py`
+This project uses [lightning cli](https://lightning.ai/docs/pytorch/stable/cli/lightning_cli.html), so all training configuration can be set through cli args or through config files. Will use `config/default.yaml` by default.
+
+To run the cli for training:
+
+`python main.py fit`
+
+You can change the default configuration with your own config file, or override specific parts of the default config file. For example change the model with a specific model config file by running 
+
+`python main.py fit --model path/to/model.yaml`
+
+Or change specific arguments from cli, like the name of the run with
+
+`python main.py fit --wandb.name 'my-run'`
+
+#### Train UNet on Decathlon BraTS dataset (example without lightning cli)
+
+`python train_example.py`
 
 ## Run inference
 
