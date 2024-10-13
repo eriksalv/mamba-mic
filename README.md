@@ -28,6 +28,11 @@ Or change specific arguments from cli, like the name of the run with
 
 `python main.py fit --wandb.name 'my-run'`
 
+#### Some parameters that might be useful to change
+
+- `trainer.max_time` depending on time limit of slurm job
+- `data.batch_size` and `data.num_workers` for efficiency depending on gpu memory and cpu count
+
 #### Train UNet on Decathlon BraTS dataset (example without lightning cli)
 
 `python train_example.py`

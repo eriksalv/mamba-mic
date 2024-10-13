@@ -26,12 +26,14 @@ class DecathlonDataModule(pl.LightningDataModule):
         data_dir="./data",
         task="Task01_BrainTumour",
         val_frac=0.2,
+        num_workers=4,
     ):
         super().__init__()
         self.data_dir = data_dir
         self.batch_size = batch_size
         self.task = task
         self.val_frac = val_frac
+        self.num_workers = num_workers
 
         self.preprocess = Compose(
             [
@@ -107,10 +109,14 @@ class DecathlonDataModule(pl.LightningDataModule):
             )
 
     def train_dataloader(self):
-        return DataLoader(self.train_set, batch_size=self.batch_size)
+        return DataLoader(
+            self.train_set, batch_size=self.batch_size, num_workers=self.num_workers
+        )
 
     def val_dataloader(self):
-        return DataLoader(self.val_set, batch_size=self.batch_size)
+        return DataLoader(
+            self.val_set, batch_size=self.batch_size, num_workers=self.num_workers
+        )
 
     def test_dataloader(self):
         return DataLoader(self.test_set, batch_size=self.batch_size)

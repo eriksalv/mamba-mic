@@ -15,7 +15,7 @@ def log_predictions_into_tables(
     split: str = None,
     data_idx: int = None,
     table: wandb.Table = None,
-    max_slices=10
+    max_slices=10,
 ):
     num_channels, _, _, num_slices = sample_image.shape
     total = min(num_slices, max_slices)
@@ -71,29 +71,30 @@ def log_predictions_into_tables(
     return table
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "--local", action=argparse.BooleanOptionalAction, default=False)
+    parser.add_argument("--local", action=argparse.BooleanOptionalAction, default=False)
     parser.add_argument("--model-ckpt", required=True)
+    parser.add_argument("--project", default="evals")
+    parser.add_argument("--name")
     args = parser.parse_args()
 
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    run = wandb.init(project='unet-brats-test', job_type='eval')
+    run = wandb.init(project=args.project, name=args.name, job_type="eval")
 
     if args.local:
         checkpoint_path = args.model_ckpt
     else:
-        artifact = run.use_artifact(args.model_ckpt, type='model')
+        artifact = run.use_artifact(args.model_ckpt, type="model")
         artifact_dir = artifact.download()
-        checkpoint_path = Path(artifact_dir) / 'model.ckpt'
+        checkpoint_path = Path(artifact_dir) / "model.ckpt"
 
     checkpoint = torch.load(checkpoint_path, weights_only=False)
-    model = UNetModel(**checkpoint['hyper_parameters'])
-    model.load_state_dict(checkpoint['state_dict'])
+    model = UNetModel(**checkpoint["hyper_parameters"])
+    model.load_state_dict(checkpoint["state_dict"])
     model.eval()
     model.to(device)
 
