@@ -32,6 +32,7 @@ Or change specific arguments from cli, like the name of the run with
 
 - `trainer.max_time` depending on time limit of slurm job
 - `data.batch_size` and `data.num_workers` for efficiency depending on gpu memory and cpu count
+- `trainer.limit_train_batches 1` for debugging/testing
 
 #### Train UNet on Decathlon BraTS dataset (example without lightning cli)
 

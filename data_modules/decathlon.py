@@ -6,7 +6,7 @@ from monai.transforms import (
     EnsureChannelFirstd,
     ScaleIntensityd,
     Orientationd,
-    CenterSpatialCropd,
+    Spacingd,
     RandSpatialCropd,
     RandFlipd,
     RandScaleIntensityd,
@@ -41,17 +41,18 @@ class DecathlonDataModule(pl.LightningDataModule):
                 EnsureChannelFirstd(keys=["image", "label"]),
                 ConvertToMultiChannelBasedOnBratsClassesd(keys="label"),
                 Orientationd(keys=["image", "label"], axcodes="RAS"),
-                # All images are not guaranteed to have same height, width, and slices, so need to crop or pad
-                CenterSpatialCropd(
-                    keys=["image", "label"], roi_size=[240, 240, 152]
-                ),  # Unet requires multiple of 8 for spatial dims
+                Spacingd(
+                    keys=["image", "label"],
+                    pixdim=(1.0, 1.0, 1.0),
+                    mode=("bilinear", "nearest"),
+                ),
                 ScaleIntensityd(keys="image", minv=0, maxv=1, channel_wise=True),
             ]
         )
         self.augment = Compose(
             [
                 RandSpatialCropd(
-                    keys=["image", "label"], roi_size=[224, 224, 144], random_size=False
+                    keys=["image", "label"], roi_size=[128, 128, 128], random_size=False
                 ),
                 RandFlipd(keys=["image", "label"], prob=0.5, spatial_axis=0),
                 RandFlipd(keys=["image", "label"], prob=0.5, spatial_axis=1),
