@@ -9,9 +9,12 @@ trainer:
   precision: 16-mixed
   log_every_n_steps: 10
   logger:
-    class_path: lightning.pytorch.loggers.WandbLogger
-    init_args:
-      log_model: all
+    - class_path: lightning.pytorch.loggers.WandbLogger
+      init_args:
+        log_model: true
+    - class_path: lightning.pytorch.loggers.TensorBoardLogger
+      init_args:
+        save_dir: tb_logs
   callbacks:
     - class_path: lightning.pytorch.callbacks.ModelCheckpoint
       init_args:
