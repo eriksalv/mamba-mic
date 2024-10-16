@@ -23,9 +23,4 @@ echo "The job was run on these nodes: $SLURM_JOB_NODELIST"
 module purge
 
 # Running your python file
-export WANDB_API_KEY=<your-api-key>
-python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-mkdir data
-python main.py fit --wandb.project <project> --wandb.name <run-name> --model path/to/model-config.yaml
+srun $1

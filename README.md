@@ -12,15 +12,33 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
+#### Login to wandb
+
+`wandb login`
+
+## Running on IDUN
+
+On a login node, after following the prerequisites and setting up environment, simply run
+
+```shell
+sbatch job.slurm "python main.py [fit/validate/test/predict] [--subcommands...]"
+```
+
+For example start a training run with a specific model config and log to wandb project by running
+
+```shell
+sbatch job.slurm "python main.py fit --wandb.project my-project --wandb.name my-run --model path/to/model-config.yaml"
+```
+
 ## Training
 
-This project uses [lightning cli](https://lightning.ai/docs/pytorch/stable/cli/lightning_cli.html), so all training configuration can be set through cli args or through config files. Will use `config/default.yaml` by default.
+This project uses [lightning cli](https://lightning.ai/docs/pytorch/stable/cli/lightning_cli.html), so all training configuration can be set through cli args or through config files.
 
 To run the cli for training:
 
 `python main.py fit`
 
-You can change the default configuration with your own config file, or override specific parts of the default config file. For example change the model with a specific model config file by running 
+Running the "fit" command will use the "configs/default.yaml" file by default. You can change the default configuration with your own config file, or override specific parts of the default config file. For example change the model with a specific model config file by running 
 
 `python main.py fit --model path/to/model.yaml`
 
