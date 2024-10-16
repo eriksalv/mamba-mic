@@ -27,6 +27,9 @@ class DecathlonDataModule(pl.LightningDataModule):
         task="Task01_BrainTumour",
         val_frac=0.2,
         num_workers=4,
+        preprocess=None,
+        augment=None,
+        postprocess=None,
     ):
         super().__init__()
         self.data_dir = data_dir
@@ -35,34 +38,46 @@ class DecathlonDataModule(pl.LightningDataModule):
         self.val_frac = val_frac
         self.num_workers = num_workers
 
-        self.preprocess = Compose(
-            [
-                LoadImaged(keys=["image", "label"]),
-                EnsureChannelFirstd(keys=["image", "label"]),
-                ConvertToMultiChannelBasedOnBratsClassesd(keys="label"),
-                Orientationd(keys=["image", "label"], axcodes="RAS"),
-                Spacingd(
-                    keys=["image", "label"],
-                    pixdim=(1.0, 1.0, 1.0),
-                    mode=("bilinear", "nearest"),
-                ),
-                ScaleIntensityd(keys="image", minv=0, maxv=1, channel_wise=True),
-            ]
+        self.preprocess = (
+            preprocess
+            if preprocess is not None
+            else Compose(
+                [
+                    LoadImaged(keys=["image", "label"]),
+                    EnsureChannelFirstd(keys=["image", "label"]),
+                    ConvertToMultiChannelBasedOnBratsClassesd(keys="label"),
+                    Orientationd(keys=["image", "label"], axcodes="RAS"),
+                    Spacingd(
+                        keys=["image", "label"],
+                        pixdim=(1.0, 1.0, 1.0),
+                        mode=("bilinear", "nearest"),
+                    ),
+                    ScaleIntensityd(keys="image", minv=0, maxv=1, channel_wise=True),
+                ]
+            )
         )
-        self.augment = Compose(
-            [
-                RandSpatialCropd(
-                    keys=["image", "label"], roi_size=[128, 128, 128], random_size=False
-                ),
-                RandFlipd(keys=["image", "label"], prob=0.5, spatial_axis=0),
-                RandFlipd(keys=["image", "label"], prob=0.5, spatial_axis=1),
-                RandFlipd(keys=["image", "label"], prob=0.5, spatial_axis=2),
-                RandScaleIntensityd(keys="image", factors=0.1, prob=1.0),
-                RandShiftIntensityd(keys="image", offsets=0.1, prob=1.0),
-            ]
+        self.augment = (
+            augment
+            if augment is not None
+            else Compose(
+                [
+                    RandSpatialCropd(
+                        keys=["image", "label"],
+                        roi_size=[128, 128, 128],
+                        random_size=False,
+                    ),
+                    RandFlipd(keys=["image", "label"], prob=0.5, spatial_axis=0),
+                    RandFlipd(keys=["image", "label"], prob=0.5, spatial_axis=1),
+                    RandFlipd(keys=["image", "label"], prob=0.5, spatial_axis=2),
+                    RandScaleIntensityd(keys="image", factors=0.1, prob=1.0),
+                    RandShiftIntensityd(keys="image", offsets=0.1, prob=1.0),
+                ]
+            )
         )
-        self.post_trans = Compose(
-            [Activations(sigmoid=True), AsDiscrete(threshold=0.5)]
+        self.postprocess = (
+            postprocess
+            if postprocess is not None
+            else Compose([Activations(sigmoid=True), AsDiscrete(threshold=0.5)])
         )
 
         self.train_set = None

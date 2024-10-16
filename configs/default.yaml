@@ -29,11 +29,12 @@ trainer:
 optimizer:
   class_path: torch.optim.AdamW
   init_args:
-    lr: 0.001
+    lr: 0.0001
 lr_scheduler:
   class_path: torch.optim.lr_scheduler.CosineAnnealingLR
   init_args:
     T_max: 50
+    eta_min: 0.000001
 model:
   class_path: system.System
   init_args:
@@ -57,3 +58,37 @@ data:
   init_args:
     batch_size: 4
     num_workers: 4
+    augment:
+      class_path: monai.transforms.Compose
+      init_args:
+        transforms:
+          - class_path: monai.transforms.RandSpatialCropd
+            init_args:
+              keys: [image, label]
+              roi_size: [128, 128, 128]
+              random_size: false
+          - class_path: monai.transforms.RandFlipd
+            init_args:
+              keys: [image, label]
+              prob: 0.5
+              spatial_axis: 0
+          - class_path: monai.transforms.RandFlipd
+            init_args:
+              keys: [image, label]
+              prob: 0.5
+              spatial_axis: 1
+          - class_path: monai.transforms.RandFlipd
+            init_args:
+              keys: [image, label]
+              prob: 0.5
+              spatial_axis: 2
+          - class_path: monai.transforms.RandScaleIntensityd
+            init_args:
+              keys: image
+              factors: 0.1
+              prob: 1.0
+          - class_path: monai.transforms.RandScaleIntensityd
+            init_args:
+              keys: image
+              offset: 0.1
+              prob: 1.0
