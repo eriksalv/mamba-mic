@@ -64,22 +64,22 @@ data:
         transforms:
           - class_path: monai.transforms.RandSpatialCropd
             init_args:
-              keys: [image, label]
+              keys: ["image", "label"]
               roi_size: [128, 128, 128]
               random_size: false
           - class_path: monai.transforms.RandFlipd
             init_args:
-              keys: [image, label]
+              keys: ["image", "label"]
               prob: 0.5
               spatial_axis: 0
           - class_path: monai.transforms.RandFlipd
             init_args:
-              keys: [image, label]
+              keys: ["image", "label"]
               prob: 0.5
               spatial_axis: 1
           - class_path: monai.transforms.RandFlipd
             init_args:
-              keys: [image, label]
+              keys: ["image", "label"]
               prob: 0.5
               spatial_axis: 2
           - class_path: monai.transforms.RandScaleIntensityd
@@ -87,8 +87,8 @@ data:
               keys: image
               factors: 0.1
               prob: 1.0
-          - class_path: monai.transforms.RandScaleIntensityd
+          - class_path: monai.transforms.RandShiftIntensityd
             init_args:
               keys: image
-              offset: 0.1
+              offsets: 0.1
               prob: 1.0
