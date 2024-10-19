@@ -1,0 +1,105 @@
+wandb:
+  project: monai-runs
+  name: vimseg
+trainer:
+  max_epochs: 500
+  devices: auto
+  accelerator: auto
+  # max_time: 00:12:00:00
+  precision: 16-mixed
+  log_every_n_steps: 10
+  logger:
+    - class_path: lightning.pytorch.loggers.WandbLogger
+      init_args:
+        log_model: true
+    - class_path: lightning.pytorch.loggers.TensorBoardLogger
+      init_args:
+        save_dir: tb_logs
+  callbacks:
+    - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+      init_args:
+        save_top_k: 3
+        monitor: val_loss
+        mode: min
+        filename: model-{epoch:02d}-{val_loss:.2f}
+        verbose: true
+    - class_path: lightning.pytorch.callbacks.LearningRateMonitor
+      init_args:
+        logging_interval: epoch
+optimizer:
+  class_path: torch.optim.AdamW
+  init_args:
+    lr: 0.0001
+lr_scheduler:
+  class_path: torch.optim.lr_scheduler.CosineAnnealingLR
+  init_args:
+    T_max: 50
+    eta_min: 0.000001
+model:
+  class_path: models.vimseg.VimSegModel
+  init_args:
+     vimseg:
+       class_path: models.vimseg.VisionMambaSeg
+       init_args:
+         img_size: 512
+         patch_size: 16
+         in_chans: 3
+         num_classes: 3
+         embed_dim: 384
+         depth: 24
+         use_checkpoint: False
+         out_indices: [5, 11, 17, 23]
+         if_fpn: True
+         use_residual_as_feature: False
+         last_layer_process: 'none'
+         pretrained: None
+         rms_norm: True
+         residual_in_fp32: True
+         fused_add_norm: True
+         if_abs_pos_embed: True
+         if_rope: True
+         if_rope_residual: True
+         bimamba_type: 'v2'
+         final_pool_type: 'all'
+         if_cls_token: True
+      
+
+data:
+  class_path: data_modules.decathlon.DecathlonDataModule
+  init_args:
+    batch_size: 4
+    num_workers: 4
+    augment:
+      class_path: monai.transforms.Compose
+      init_args:
+        transforms:
+          - class_path: monai.transforms.RandSpatialCropd
+            init_args:
+              keys: [image, label]
+              roi_size: [128, 128, 128]
+              random_size: false
+          - class_path: monai.transforms.RandFlipd
+            init_args:
+              keys: [image, label]
+              prob: 0.5
+              spatial_axis: 0
+          - class_path: monai.transforms.RandFlipd
+            init_args:
+              keys: [image, label]
+              prob: 0.5
+              spatial_axis: 1
+          - class_path: monai.transforms.RandFlipd
+            init_args:
+              keys: [image, label]
+              prob: 0.5
+              spatial_axis: 2
+          - class_path: monai.transforms.RandScaleIntensityd
+            init_args:
+              keys: image
+              factors: 0.1
+              prob: 1.0
+          - class_path: monai.transforms.RandScaleIntensityd
+            init_args:
+              keys: image
+              offset: 0.1
+              prob: 1.0
