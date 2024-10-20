@@ -20,6 +20,7 @@ from monai.networks.blocks.dynunet_block import UnetOutBlock
 from monai.networks.blocks.unetr_block import UnetrBasicBlock, UnetrUpBlock
 from mamba_3d.mamba_ssm.modules.mamba_simple import Mamba
 import torch.nn.functional as F 
+from monai.inferers import Inferer
 
 class LayerNorm(nn.Module):
     r""" LayerNorm that supports two data formats: channels_last (default) or channels_first.
@@ -345,21 +346,29 @@ class SegMamba(nn.Module):
         return self.out(out)
     
 class SegMambaModel(pl.LightningModule):
-    def __init__(self, segmamba, lr=0.001) -> None:
+    def __init__(
+        self,
+        segmamba: SegMamba,
+        val_inferer: Inferer,
+        lr=0.001,) -> None:
         super().__init__()
         self.lr = lr
+        self.val_inferer = val_inferer
         self.criterion = DiceCELoss(sigmoid=True, squared_pred=True)
         self.dice_metric = DiceHelper(sigmoid=True)
-        self.segmamba = SegMamba(**segmamba)
+        self.segmamba = segmamba
         self.save_hyperparameters()
         print(f"SegMambaModel initialized with segmamba: {segmamba}")
 
     def forward(self, x):
         return self.segmamba(x)
 
-    def infer_batch(self, batch):
+    def infer_batch(self, batch, val=False):
         x, y = batch["image"], batch["label"]
-        y_hat = self(x)
+        if val is False:
+            y_hat = self(x)
+        else:
+            y_hat = self.val_inferer(inputs=x, network=self.segmamba)
         return y_hat, y
 
     def training_step(self, batch, batch_idx):

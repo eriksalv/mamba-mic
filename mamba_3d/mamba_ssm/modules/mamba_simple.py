@@ -13,21 +13,25 @@ from einops import rearrange, repeat
 try:
     from causal_conv1d import causal_conv1d_fn, causal_conv1d_update
 except ImportError:
+    print("Failed to import from causal_conv1d")
     causal_conv1d_fn, causal_conv1d_update = None
 
 try:
     from mamba_3d.mamba_ssm.ops.selective_scan_interface import selective_scan_fn, mamba_inner_fn, bimamba_inner_fn, mamba_inner_fn_no_out_proj
 except ImportError:
+    print("Failed to import from selective_scan_interface")
     selective_scan_fn, mamba_inner_fn, bimamba_inner_fn, mamba_inner_fn_no_out_proj = None, None, None, None, None
 
 try:
     from mamba_3d.mamba_ssm.ops.triton.selective_state_update import selective_state_update
 except ImportError:
+    print("Failed to import from selective_state_update")
     selective_state_update = None
 
 try:
     from mamba_3d.mamba_ssm.ops.triton.layernorm import RMSNorm, layer_norm_fn, rms_norm_fn
 except ImportError:
+    print("Failed to import from layernorm")
     RMSNorm, layer_norm_fn, rms_norm_fn = None, None, None
 
 
