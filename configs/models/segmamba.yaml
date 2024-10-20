@@ -1,0 +1,10 @@
+  class_path: models.segmamba.SegMambaModel
+  init_args:
+    segmamba:
+      in_chans: 4     
+      out_chans: 4     
+      depths: [2, 2, 2, 2] 
+      feat_size: [48, 96, 192, 384] 
+        
+
+     
