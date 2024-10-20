@@ -2,7 +2,7 @@
   init_args:
     segmamba:
       in_chans: 4     
-      out_chans: 4     
+      out_chans: 3     
       depths: [2, 2, 2, 2] 
       feat_size: [48, 96, 192, 384] 
     val_inferer:
