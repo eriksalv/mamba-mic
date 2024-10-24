@@ -77,7 +77,12 @@ class DecathlonDataModule(pl.LightningDataModule):
         self.postprocess = (
             postprocess
             if postprocess is not None
-            else Compose([Activations(sigmoid=True), AsDiscrete(threshold=0.5)])
+            else Compose(
+                [
+                    Activations(sigmoid=True),
+                    AsDiscrete(threshold=0.5),
+                ]
+            )
         )
 
         self.train_set = None

@@ -1,8 +1,9 @@
 import torch
 import lightning.pytorch as pl
-from monai.metrics import DiceHelper
+from monai.metrics import DiceMetric, HausdorffDistanceMetric
 from monai.losses.dice import DiceCELoss
 from monai.inferers import Inferer
+from monai.transforms import Compose, Activations, AsDiscrete
 
 
 class System(pl.LightningModule):
@@ -18,7 +19,20 @@ class System(pl.LightningModule):
         self.lr = lr
 
         self.criterion = DiceCELoss(sigmoid=True, squared_pred=True)
-        self.dice_metric = DiceHelper(sigmoid=True)
+        self.dice_metric = DiceMetric(include_background=True, reduction="none")
+        self.hd95_metric = HausdorffDistanceMetric(
+            include_background=True,
+            distance_metric="euclidean",
+            percentile=95,
+            reduction="none",
+        )
+
+        self.postprocess = Compose(
+            [
+                Activations(sigmoid=True),
+                AsDiscrete(threshold=0.5),
+            ]
+        )
 
         self.save_hyperparameters()
 
@@ -45,13 +59,36 @@ class System(pl.LightningModule):
         y_hat, y = self.infer_batch(batch, val=True)
         loss = self.criterion(y_hat, y)
 
-        dice_score, _ = self.dice_metric(y_hat, y)
-        val_dice = dice_score.mean()
+        y_hat_binarized = self.postprocess(y_hat)
+
+        self.dice_metric(y_hat_binarized, y)
+        self.hd95_metric(y_hat_binarized, y)
 
         self.log("val_loss", loss, sync_dist=True)
-        self.log("val_dice", val_dice, sync_dist=True)
 
-        return {"val_loss": loss, "val_dice": val_dice}
+        return {"val_loss": loss}
+
+    def on_validation_epoch_end(self):
+        per_channel_dice = self.dice_metric.aggregate().mean(dim=0)
+        per_channel_hd95 = self.hd95_metric.aggregate().mean(dim=0)
+
+        self.dice_metric.reset()
+        self.hd95_metric.reset()
+
+        self.log_dict(
+            {"val_dice": per_channel_dice.mean(), "val_hd95": per_channel_hd95.mean()},
+            sync_dist=True,
+        )
+
+        num_channels = len(per_channel_dice)
+        for i in range(num_channels):
+            self.log_dict(
+                {
+                    f"channel{i}/val_dice": per_channel_dice[i],
+                    f"channel{i}/val_hd95": per_channel_hd95[i],
+                },
+                sync_dist=True,
+            )
 
     def configure_optimizers(self):
         optimizer = torch.optim.AdamW(self.parameters(), lr=self.lr)

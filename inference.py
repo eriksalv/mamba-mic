@@ -87,7 +87,6 @@ if __name__ == "__main__":
         project=args.project,
         name=args.name,
         job_type="eval",
-        config={"sw_batch_size": args.sw_batch_size, "overlap": args.overlap},
     )
 
     if args.local:
