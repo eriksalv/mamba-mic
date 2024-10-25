@@ -153,7 +153,7 @@ if not SKIP_CUDA_BUILD:
 
 
 def get_package_version():
-    with open(Path(this_dir) / "causal_conv1d" / "__init__.py", "r") as f:
+    with open(Path(this_dir) / "__init__.py", "r") as f:
         version_match = re.search(r"^__version__\s*=\s*(.*)$", f.read(), re.MULTILINE)
     public_version = ast.literal_eval(version_match.group(1))
     local_version = os.environ.get("CAUSAL_CONV1D_LOCAL_VERSION")
