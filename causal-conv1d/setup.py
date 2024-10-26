@@ -103,7 +103,8 @@ if not SKIP_CUDA_BUILD:
                 "causal_conv1d is only supported on CUDA 11.6 and above.  "
                 "Note: make sure nvcc has a supported version by running nvcc -V."
             )
-
+    cc_flag.append("-gencode")
+    cc_flag.append("arch=compute_60,code=sm_60")
     cc_flag.append("-gencode")
     cc_flag.append("arch=compute_70,code=sm_70")
     cc_flag.append("-gencode")
