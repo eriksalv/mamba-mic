@@ -131,12 +131,18 @@ class DecathlonDataModule(pl.LightningDataModule):
 
     def train_dataloader(self):
         return DataLoader(
-            self.train_set, batch_size=self.batch_size, num_workers=self.num_workers
+            self.train_set,
+            batch_size=self.batch_size,
+            num_workers=self.num_workers,
+            shuffle=True,
         )
 
     def val_dataloader(self):
         return DataLoader(
-            self.val_set, batch_size=self.batch_size, num_workers=self.num_workers
+            self.val_set,
+            batch_size=self.batch_size,
+            num_workers=self.num_workers,
+            shuffle=True,
         )
 
     def test_dataloader(self):

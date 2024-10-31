@@ -62,7 +62,9 @@ class System(pl.LightningModule):
         y_hat_binarized = self.postprocess(y_hat)
 
         self.dice_metric(y_hat_binarized, y)
-        self.hd95_metric(y_hat_binarized, y)
+
+        if batch_idx % 10 == 0:
+            self.hd95_metric(y_hat_binarized, y)
 
         self.log("val_loss", loss, sync_dist=True)
 
