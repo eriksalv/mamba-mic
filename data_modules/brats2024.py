@@ -1,22 +1,6 @@
 import lightning.pytorch as pl
 from monai.data import CacheDataset
-from monai.transforms import (
-    Compose,
-    LoadImaged,
-    EnsureChannelFirstd,
-    ScaleIntensityd,
-    Orientationd,
-    Spacingd,
-    RandSpatialCropd,
-    RandFlipd,
-    RandScaleIntensityd,
-    RandShiftIntensityd,
-    MapTransform,
-    Activations,
-    AsDiscrete,
-    ConcatItemsd,
-    SelectItemsd,
-)
+from monai import transforms as T
 from torch.utils.data import DataLoader, random_split
 import torch
 from glob import glob
@@ -28,7 +12,7 @@ class BraTS2024DataModule(pl.LightningDataModule):
         self,
         batch_size: int,
         data_dir="./data/BRATS2024",
-        val_frac=0.2,
+        val_frac=0.15,
         num_workers=4,
         cache_rate=0.1,
         preprocess=None,
@@ -45,51 +29,52 @@ class BraTS2024DataModule(pl.LightningDataModule):
         self.preprocess = (
             preprocess
             if preprocess is not None
-            else Compose(
+            else T.Compose(
                 [
-                    LoadImaged(keys=["t1c", "t1n", "t2f", "t2w", "label"]),
-                    EnsureChannelFirstd(
+                    T.LoadImaged(keys=["t1c", "t1n", "t2f", "t2w", "label"]),
+                    T.EnsureChannelFirstd(
                         keys=["t1c", "t1n", "t2f", "t2w"],
                         channel_dim="no_channel",
                     ),
-                    ConcatItemsd(keys=["t1c", "t1n", "t2f", "t2w"], name="image"),
-                    SelectItemsd(keys=["image", "label"]),
-                    ConvertToMultiChannelBasedOnBratsClassesd(keys="label"),
-                    Orientationd(keys=["image", "label"], axcodes="RAS"),
-                    Spacingd(
-                        keys=["image", "label"],
-                        pixdim=(1.0, 1.0, 1.0),
-                        mode=("bilinear", "nearest"),
+                    T.ConcatItemsd(keys=["t1c", "t1n", "t2f", "t2w"], name="image"),
+                    T.SelectItemsd(keys=["image", "label"]),
+                    T.ConvertToMultiChannelBasedOnBratsClassesd(keys="label"),
+                    T.Orientationd(keys=["image", "label"], axcodes="RAS"),
+                    T.CropForegroundd(keys=["image", "label"], source_key="image"),
+                    T.NormalizeIntensityd(
+                        keys="image", nonzero=True, channel_wise=True
                     ),
-                    ScaleIntensityd(keys="image", minv=0, maxv=1, channel_wise=True),
                 ]
             )
         )
         self.augment = (
             augment
             if augment is not None
-            else Compose(
+            else T.Compose(
                 [
-                    RandSpatialCropd(
+                    T.RandSpatialCropd(
                         keys=["image", "label"],
                         roi_size=[128, 128, 128],
                         random_size=False,
                     ),
-                    RandFlipd(keys=["image", "label"], prob=0.5, spatial_axis=0),
-                    RandFlipd(keys=["image", "label"], prob=0.5, spatial_axis=1),
-                    RandFlipd(keys=["image", "label"], prob=0.5, spatial_axis=2),
-                    RandScaleIntensityd(keys="image", factors=0.1, prob=1.0),
-                    RandShiftIntensityd(keys="image", offsets=0.1, prob=1.0),
+                    T.RandFlipd(keys=["image", "label"], prob=0.5, spatial_axis=0),
+                    T.RandFlipd(keys=["image", "label"], prob=0.5, spatial_axis=1),
+                    T.RandFlipd(keys=["image", "label"], prob=0.5, spatial_axis=2),
+                    T.NormalizeIntensityd(
+                        keys="image", nonzero=True, channel_wise=True
+                    ),
+                    T.RandScaleIntensityd(keys="image", factors=0.1, prob=1.0),
+                    T.RandShiftIntensityd(keys="image", offsets=0.1, prob=1.0),
                 ]
             )
         )
         self.postprocess = (
             postprocess
             if postprocess is not None
-            else Compose(
+            else T.Compose(
                 [
-                    Activations(sigmoid=True),
-                    AsDiscrete(threshold=0.5),
+                    T.Activations(sigmoid=True),
+                    T.AsDiscrete(threshold=0.5),
                 ]
             )
         )
@@ -173,7 +158,7 @@ class BraTS2024DataModule(pl.LightningDataModule):
             )
             self.train_set = CacheDataset(
                 train_subjects,
-                transform=Compose([self.preprocess, self.augment]),
+                transform=T.Compose([self.preprocess, self.augment]),
                 cache_rate=self.cache_rate,
             )
             self.val_set = CacheDataset(
@@ -208,7 +193,7 @@ class BraTS2024DataModule(pl.LightningDataModule):
         return DataLoader(self.test_set, batch_size=self.batch_size)
 
 
-class ConvertToMultiChannelBasedOnBratsClassesd(MapTransform):
+class ConvertToMultiChannelBasedOnBratsClassesd(T.MapTransform):
     """
     Converts non-overlapping BraTS 2024 labels (NETC, SNFH, ET, RC)
     into partially overlapping multi-channels (ET, TC, WT, RC)

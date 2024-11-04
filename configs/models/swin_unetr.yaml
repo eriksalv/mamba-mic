@@ -1,0 +1,11 @@
+class_path: system.System
+init_args:
+  net:
+    class_path: monai.networks.nets.SwinUNETR
+    init_args:
+      img_size: [128, 128, 128]
+      in_channels: 4
+      out_channels: 3
+      feature_size: 48
+      depths: [2, 2, 4, 2]
+
