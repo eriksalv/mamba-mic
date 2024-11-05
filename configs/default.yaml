@@ -57,7 +57,7 @@ model:
 data:
   class_path: data_modules.decathlon.DecathlonDataModule
   init_args:
-    batch_size: 3
+    batch_size: 1
     num_workers: 2
     augment:
       class_path: monai.transforms.Compose

@@ -14,7 +14,7 @@ class BraTS2024DataModule(pl.LightningDataModule):
         data_dir="./data/BRATS2024",
         val_frac=0.15,
         num_workers=4,
-        cache_rate=0.1,
+        cache_rate=0.0,
         preprocess=None,
         augment=None,
         postprocess=None,
@@ -38,12 +38,9 @@ class BraTS2024DataModule(pl.LightningDataModule):
                     ),
                     T.ConcatItemsd(keys=["t1c", "t1n", "t2f", "t2w"], name="image"),
                     T.SelectItemsd(keys=["image", "label"]),
-                    T.ConvertToMultiChannelBasedOnBratsClassesd(keys="label"),
+                    ConvertToMultiChannelBasedOnBratsClassesd(keys="label"),
                     T.Orientationd(keys=["image", "label"], axcodes="RAS"),
-                    T.CropForegroundd(keys=["image", "label"], source_key="image"),
-                    T.NormalizeIntensityd(
-                        keys="image", nonzero=True, channel_wise=True
-                    ),
+                    T.ScaleIntensityd(keys="image", minv=0, maxv=1, channel_wise=True),
                 ]
             )
         )
@@ -52,17 +49,14 @@ class BraTS2024DataModule(pl.LightningDataModule):
             if augment is not None
             else T.Compose(
                 [
-                    T.RandSpatialCropd(
+                    T.RandCropByLabelClassesd(
                         keys=["image", "label"],
-                        roi_size=[128, 128, 128],
-                        random_size=False,
+                        label_key='label',
+                        spatial_size=[128, 128, 128],
                     ),
                     T.RandFlipd(keys=["image", "label"], prob=0.5, spatial_axis=0),
                     T.RandFlipd(keys=["image", "label"], prob=0.5, spatial_axis=1),
                     T.RandFlipd(keys=["image", "label"], prob=0.5, spatial_axis=2),
-                    T.NormalizeIntensityd(
-                        keys="image", nonzero=True, channel_wise=True
-                    ),
                     T.RandScaleIntensityd(keys="image", factors=0.1, prob=1.0),
                     T.RandShiftIntensityd(keys="image", offsets=0.1, prob=1.0),
                 ]
@@ -186,7 +180,7 @@ class BraTS2024DataModule(pl.LightningDataModule):
             self.val_set,
             batch_size=self.batch_size,
             num_workers=self.num_workers,
-            shuffle=True,
+            shuffle=False,
         )
 
     def test_dataloader(self):

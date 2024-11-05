@@ -1,7 +1,10 @@
 class_path: data_modules.brats2024.BraTS2024DataModule
 init_args:
   batch_size: 4
-  num_workers: 4
+  num_workers: 8
+  data_dir: data/BRATS2024
+  cache_rate: 0.1
+  val_frac: 0.2
   augment:
     class_path: monai.transforms.Compose
     init_args:
@@ -26,11 +29,6 @@ init_args:
             keys: ["image", "label"]
             prob: 0.2
             spatial_axis: 2
-        - class_path: monai.transforms.NormalizeIntensityd
-          init_args:
-            keys: image
-            nonzero: true
-            channel_wise: true
         - class_path: monai.transforms.RandGaussianNoised
           init_args:
             keys: image
