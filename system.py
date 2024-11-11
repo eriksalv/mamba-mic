@@ -1,6 +1,6 @@
 import torch
 import lightning.pytorch as pl
-from monai.metrics import DiceMetric
+from monai.metrics import DiceMetric, HausdorffDistanceMetric
 from monai.losses.dice import DiceCELoss
 from monai.inferers import Inferer
 from monai.transforms import Compose, Activations, AsDiscrete
@@ -19,9 +19,12 @@ class System(pl.LightningModule):
         self.lr = lr
 
         self.criterion = DiceCELoss(sigmoid=True, squared_pred=True)
-        self.mean_dice = DiceMetric(include_background=True, reduction="mean")
-        self.channel_dice = DiceMetric(
-            include_background=True, reduction="mean_channel"
+        self.dice_metric = DiceMetric(include_background=True, reduction="none")
+        self.hd95_metric = HausdorffDistanceMetric(
+            include_background=True,
+            distance_metric="euclidean",
+            percentile=95,
+            reduction="none",
         )
 
         self.postprocess = Compose(
@@ -58,22 +61,24 @@ class System(pl.LightningModule):
 
         y_hat_binarized = self.postprocess(y_hat)
 
-        self.mean_dice(y_hat_binarized, y)
-        self.channel_dice(y_hat_binarized, y)
+        self.dice_metric(y_hat_binarized, y)
+
+        if batch_idx % 10 == 0:
+            self.hd95_metric(y_hat_binarized, y)
 
         self.log("val_loss", loss, sync_dist=True)
 
         return {"val_loss": loss}
 
     def on_validation_epoch_end(self):
-        mean_dice = self.mean_dice.aggregate()
-        per_channel_dice = self.channel_dice.aggregate()
+        per_channel_dice = self.dice_metric.aggregate().nanmean(dim=0)
+        per_channel_hd95 = self.hd95_metric.aggregate().nanmean(dim=0)
 
-        self.mean_dice.reset()
-        self.channel_dice.reset()
+        self.dice_metric.reset()
+        self.hd95_metric.reset()
 
         self.log_dict(
-            {"val_dice": mean_dice},
+            {"val_dice": per_channel_dice.mean(), "val_hd95": per_channel_hd95.mean()},
             sync_dist=True,
         )
 
