@@ -1,6 +1,6 @@
 import torch
 import lightning.pytorch as pl
-from monai.metrics import DiceMetric, HausdorffDistanceMetric
+from monai.metrics import DiceMetric
 from monai.losses.dice import DiceCELoss
 from monai.inferers import Inferer
 from monai.transforms import Compose, Activations, AsDiscrete
@@ -22,12 +22,6 @@ class System(pl.LightningModule):
         self.mean_dice = DiceMetric(include_background=True, reduction="mean")
         self.channel_dice = DiceMetric(
             include_background=True, reduction="mean_channel"
-        )
-        self.channel_hd95 = HausdorffDistanceMetric(
-            include_background=True,
-            distance_metric="euclidean",
-            percentile=95,
-            reduction="mean_channel",
         )
 
         self.postprocess = Compose(
@@ -67,9 +61,6 @@ class System(pl.LightningModule):
         self.mean_dice(y_hat_binarized, y)
         self.channel_dice(y_hat_binarized, y)
 
-        if self.current_epoch % 10 == 0:
-            self.channel_hd95(y_hat_binarized, y)
-
         self.log("val_loss", loss, sync_dist=True)
 
         return {"val_loss": loss}
@@ -77,14 +68,12 @@ class System(pl.LightningModule):
     def on_validation_epoch_end(self):
         mean_dice = self.mean_dice.aggregate()
         per_channel_dice = self.channel_dice.aggregate()
-        per_channel_hd95 = self.channel_hd95.aggregate()
 
         self.mean_dice.reset()
         self.channel_dice.reset()
-        self.channel_hd95.reset()
 
         self.log_dict(
-            {"val_dice": mean_dice, "val_hd95": per_channel_hd95.mean()},
+            {"val_dice": mean_dice},
             sync_dist=True,
         )
 
@@ -93,7 +82,6 @@ class System(pl.LightningModule):
             self.log_dict(
                 {
                     f"channel{i}/val_dice": per_channel_dice[i],
-                    f"channel{i}/val_hd95": per_channel_hd95[i],
                 },
                 sync_dist=True,
             )
