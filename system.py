@@ -19,12 +19,15 @@ class System(pl.LightningModule):
         self.lr = lr
 
         self.criterion = DiceCELoss(sigmoid=True, squared_pred=True)
-        self.dice_metric = DiceMetric(include_background=True, reduction="none")
-        self.hd95_metric = HausdorffDistanceMetric(
+        self.mean_dice = DiceMetric(include_background=True, reduction="mean")
+        self.channel_dice = DiceMetric(
+            include_background=True, reduction="mean_channel"
+        )
+        self.channel_hd95 = HausdorffDistanceMetric(
             include_background=True,
             distance_metric="euclidean",
             percentile=95,
-            reduction="none",
+            reduction="mean_channel",
         )
 
         self.postprocess = Compose(
@@ -61,24 +64,27 @@ class System(pl.LightningModule):
 
         y_hat_binarized = self.postprocess(y_hat)
 
-        self.dice_metric(y_hat_binarized, y)
+        self.mean_dice(y_hat_binarized, y)
+        self.channel_dice(y_hat_binarized, y)
 
-        if batch_idx % 10 == 0:
-            self.hd95_metric(y_hat_binarized, y)
+        if self.current_epoch % 10 == 0:
+            self.channel_hd95(y_hat_binarized, y)
 
         self.log("val_loss", loss, sync_dist=True)
 
         return {"val_loss": loss}
 
     def on_validation_epoch_end(self):
-        per_channel_dice = self.dice_metric.aggregate().mean(dim=0)
-        per_channel_hd95 = self.hd95_metric.aggregate().mean(dim=0)
+        mean_dice = self.mean_dice.aggregate()
+        per_channel_dice = self.channel_dice.aggregate()
+        per_channel_hd95 = self.channel_hd95.aggregate()
 
-        self.dice_metric.reset()
-        self.hd95_metric.reset()
+        self.mean_dice.reset()
+        self.channel_dice.reset()
+        self.channel_hd95.reset()
 
         self.log_dict(
-            {"val_dice": per_channel_dice.mean(), "val_hd95": per_channel_hd95.mean()},
+            {"val_dice": mean_dice, "val_hd95": per_channel_hd95.mean()},
             sync_dist=True,
         )
 
