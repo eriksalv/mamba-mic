@@ -87,6 +87,7 @@ class System(pl.LightningModule):
             self.log_dict(
                 {
                     f"channel{i}/val_dice": per_channel_dice[i],
+                    f"channel{i}/val_hd95": per_channel_hd95[i],
                 },
                 sync_dist=True,
             )
