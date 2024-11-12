@@ -1,6 +1,6 @@
 class_path: data_modules.brats2024.BraTS2024DataModule
 init_args:
-  batch_size: 4
+  batch_size: 3
   num_workers: 8
   data_dir: data/BRATS2024
   cache_rate: 0.1
