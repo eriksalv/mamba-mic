@@ -1,0 +1,18 @@
+class_path: system.System
+init_args:
+  net:
+    class_path: monai.networks.nets.SegResNet
+    init_args:
+      in_channels: 4
+      out_channels: 4
+      spatial_dims: 3
+      init_filters: 32
+      blocks_down: [1, 2, 2, 4]
+      blocks_up: [1, 1, 1]
+  val_inferer:
+    class_path: monai.inferers.SlidingWindowInferer
+    init_args:
+      roi_size: [128, 128, 128]
+      sw_batch_size: 3
+      overlap: 0.5
+      mode: gaussian

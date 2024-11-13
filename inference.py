@@ -1,7 +1,7 @@
 import wandb
 import torch
 from pathlib import Path
-from models.unet import UNetModel
+from system import System
 from tqdm.auto import tqdm
 import numpy as np
 import random
@@ -83,7 +83,11 @@ if __name__ == "__main__":
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    run = wandb.init(project=args.project, name=args.name, job_type="eval")
+    run = wandb.init(
+        project=args.project,
+        name=args.name,
+        job_type="eval",
+    )
 
     if args.local:
         checkpoint_path = args.model_ckpt
@@ -92,13 +96,11 @@ if __name__ == "__main__":
         artifact_dir = artifact.download()
         checkpoint_path = Path(artifact_dir) / "model.ckpt"
 
-    checkpoint = torch.load(checkpoint_path, weights_only=False)
-    model = UNetModel(**checkpoint["hyper_parameters"])
-    model.load_state_dict(checkpoint["state_dict"])
+    model = System.load_from_checkpoint(checkpoint_path=checkpoint_path)
     model.eval()
     model.to(device)
 
-    data_module = DecathlonDataModule(batch_size=4)
+    data_module = DecathlonDataModule(batch_size=1)
     data_module.setup()
     val_dataset = data_module.val_set
 
@@ -133,8 +135,8 @@ if __name__ == "__main__":
         )
         for data_idx, sample in progress_bar:
             val_input = sample["image"].unsqueeze(0).to(device)
-            val_output = model(val_input)
-            val_output = data_module.post_trans(val_output[0])
+            val_output = model.val_inferer(inputs=val_input, network=model)
+            val_output = data_module.postprocess(val_output[0])
             prediction_table = log_predictions_into_tables(
                 sample_image=sample["image"].cpu().numpy(),
                 sample_label=sample["label"].cpu().numpy(),

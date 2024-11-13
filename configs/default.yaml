@@ -2,12 +2,13 @@ wandb:
   project: monai-runs
   name: example
 trainer:
-  max_epochs: 3
+  max_epochs: 300
   devices: auto
   accelerator: auto
   # max_time: 00:12:00:00
   precision: 16-mixed
-  log_every_n_steps: 10
+  log_every_n_steps: 5
+  check_val_every_n_epoch: 3
   logger:
     - class_path: lightning.pytorch.loggers.WandbLogger
       init_args:
@@ -29,11 +30,11 @@ trainer:
 optimizer:
   class_path: torch.optim.AdamW
   init_args:
-    lr: 0.0001
+    lr: 0.0004
 lr_scheduler:
   class_path: torch.optim.lr_scheduler.CosineAnnealingLR
   init_args:
-    T_max: 50
+    T_max: 300
     eta_min: 0.000001
 model:
   class_path: system.System
@@ -56,8 +57,8 @@ model:
 data:
   class_path: data_modules.decathlon.DecathlonDataModule
   init_args:
-    batch_size: 4
-    num_workers: 4
+    batch_size: 1
+    num_workers: 2
     augment:
       class_path: monai.transforms.Compose
       init_args:

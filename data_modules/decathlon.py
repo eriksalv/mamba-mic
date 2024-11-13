@@ -82,7 +82,12 @@ class DecathlonDataModule(pl.LightningDataModule):
         self.postprocess = (
             postprocess
             if postprocess is not None
-            else Compose([Activations(sigmoid=True), AsDiscrete(threshold=0.5)])
+            else Compose(
+                [
+                    Activations(sigmoid=True),
+                    AsDiscrete(threshold=0.5),
+                ]
+            )
         )
 
         self.train_set = None
@@ -131,12 +136,18 @@ class DecathlonDataModule(pl.LightningDataModule):
 
     def train_dataloader(self):
         return DataLoader(
-            self.train_set, batch_size=self.batch_size, num_workers=self.num_workers, collate_fn=collate_fn
+            self.train_set,
+            batch_size=self.batch_size,
+            num_workers=self.num_workers,
+            shuffle=True,
         )
 
     def val_dataloader(self):
         return DataLoader(
-            self.val_set, batch_size=self.batch_size, num_workers=self.num_workers, collate_fn=collate_fn
+            self.val_set,
+            batch_size=self.batch_size,
+            num_workers=self.num_workers,
+            shuffle=True,
         )
 
     def test_dataloader(self):
