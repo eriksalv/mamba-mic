@@ -1,16 +1,17 @@
-  class_path: models.segmamba.SegMambaModel
-  init_args:
-    segmamba:
-      in_chans: 4     
-      out_chans: 3     
-      depths: [2, 2, 2, 2] 
-      feat_size: [48, 96, 192, 384] 
-    val_inferer:
-      class_path: monai.inferers.SlidingWindowInferer
-      init_args:
-        roi_size: [128, 128, 128]
-        sw_batch_size: 4
-        overlap: 0.5
-        mode: gaussian
-
+class_path: system.System
+init_args:
+  net:
+    class_path: models.segmamba.SegMamba
+    init_args: 
+      in_chans: 4
+      out_chans: 4
+      depths: [2, 2, 2, 2]
+      feat_size: [48, 96, 192, 384]
+  val_inferer:
+    class_path: monai.inferers.SlidingWindowInferer
+    init_args:
+      roi_size: [128, 128, 128]
+      sw_batch_size: 4
+      overlap: 0.5
+      mode: gaussian
      
