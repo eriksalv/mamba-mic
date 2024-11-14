@@ -37,8 +37,8 @@ class HNTSMRGDataModule(pl.LightningDataModule):
             else T.Compose(
                 [
                     T.LoadImaged(keys=["image", "label"]),
-                    T.EnsureChannelFirstd(keys='image', channel_dim='no_channel'),
-                    ConvertToMultiChannelBasedOnHNTSMRGClassesd(keys='label'),
+                    T.EnsureChannelFirstd(keys="image", channel_dim="no_channel"),
+                    ConvertToMultiChannelBasedOnHNTSMRGClassesd(keys="label"),
                     T.Orientationd(keys=["image", "label"], axcodes="RAS"),
                     T.Spacingd(
                         keys=["image", "label"],
@@ -57,7 +57,7 @@ class HNTSMRGDataModule(pl.LightningDataModule):
                     T.RandSpatialCropd(
                         keys=["image", "label"],
                         roi_size=[192, 192, 48],
-                        random_size=False
+                        random_size=False,
                     ),
                     T.RandFlipd(keys=["image", "label"], prob=0.5, spatial_axis=0),
                     T.RandFlipd(keys=["image", "label"], prob=0.5, spatial_axis=1),
@@ -72,7 +72,7 @@ class HNTSMRGDataModule(pl.LightningDataModule):
             if postprocess is not None
             else T.Compose(
                 [
-                    T.Activations(sigmoid=True),
+                    T.Activations(softmax=True),
                     T.AsDiscrete(threshold=0.5),
                 ]
             )
@@ -161,6 +161,7 @@ class HNTSMRGDataModule(pl.LightningDataModule):
 
     def test_dataloader(self):
         return DataLoader(self.test_set, batch_size=self.batch_size)
+
 
 class ConvertToMultiChannelBasedOnHNTSMRGClassesd(T.MapTransform):
     """

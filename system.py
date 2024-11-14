@@ -8,17 +8,19 @@ from monai.transforms import Compose, Activations, AsDiscrete
 
 class System(pl.LightningModule):
     def __init__(
-        self,
-        net: torch.nn.Module,
-        val_inferer: Inferer,
-        lr=0.001,
+        self, net: torch.nn.Module, val_inferer: Inferer, lr=0.001, softmax=False
     ) -> None:
         super().__init__()
         self.net = net
         self.val_inferer = val_inferer
         self.lr = lr
+        self.softmax = softmax
 
-        self.criterion = DiceCELoss(sigmoid=True, squared_pred=True)
+        self.criterion = DiceCELoss(
+            sigmoid=True if not softmax else False,
+            softmax=softmax,
+            squared_pred=True,
+        )
         self.dice_metric = DiceMetric(include_background=True, reduction="none")
         self.hd95_metric = HausdorffDistanceMetric(
             include_background=True,
@@ -29,7 +31,7 @@ class System(pl.LightningModule):
 
         self.postprocess = Compose(
             [
-                Activations(sigmoid=True),
+                Activations(sigmoid=True if not softmax else False, softmax=softmax),
                 AsDiscrete(threshold=0.5),
             ]
         )
