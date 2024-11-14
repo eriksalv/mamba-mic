@@ -37,8 +37,14 @@ class HNTSMRGDataModule(pl.LightningDataModule):
             else T.Compose(
                 [
                     T.LoadImaged(keys=["image", "label"]),
-                    T.SelectItemsd(keys=["image", "label"]),
+                    T.EnsureChannelFirstd(keys='image', channel_dim='no_channel'),
+                    ConvertToMultiChannelBasedOnHNTSMRGClassesd(keys='label'),
                     T.Orientationd(keys=["image", "label"], axcodes="RAS"),
+                    T.Spacingd(
+                        keys=["image", "label"],
+                        pixdim=(0.5, 0.5, 1.2),
+                        mode=("bilinear", "nearest"),
+                    ),
                     T.ScaleIntensityd(keys="image", minv=0, maxv=1),
                 ]
             )
@@ -50,7 +56,8 @@ class HNTSMRGDataModule(pl.LightningDataModule):
                 [
                     T.RandSpatialCropd(
                         keys=["image", "label"],
-                        spatial_size=[192, 192, 48],
+                        roi_size=[192, 192, 48],
+                        random_size=False
                     ),
                     T.RandFlipd(keys=["image", "label"], prob=0.5, spatial_axis=0),
                     T.RandFlipd(keys=["image", "label"], prob=0.5, spatial_axis=1),
@@ -154,3 +161,17 @@ class HNTSMRGDataModule(pl.LightningDataModule):
 
     def test_dataloader(self):
         return DataLoader(self.test_set, batch_size=self.batch_size)
+
+class ConvertToMultiChannelBasedOnHNTSMRGClassesd(T.MapTransform):
+    """
+    Converts non-overlapping HNTS-MRG 2024 labels (Primary tumour, lymph nodes) into multi-channels
+    """
+
+    def __call__(self, data):
+        d = dict(data)
+        for key in self.keys:
+            result = []
+            result.append(d[key] == 1)
+            result.append(d[key] == 2)
+            d[key] = torch.stack(result, axis=0).squeeze().float()
+        return d
