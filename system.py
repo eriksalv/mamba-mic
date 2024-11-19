@@ -8,33 +8,52 @@ from monai.transforms import Compose, Activations, AsDiscrete
 
 class System(pl.LightningModule):
     def __init__(
-        self, net: torch.nn.Module, val_inferer: Inferer, lr=0.001, softmax=False
+        self,
+        net: torch.nn.Module,
+        val_inferer: Inferer,
+        lr=0.001,
+        softmax=False,
+        include_background=True,
+        num_output_channels=None,
     ) -> None:
         super().__init__()
         self.net = net
         self.val_inferer = val_inferer
         self.lr = lr
         self.softmax = softmax
+        self.include_background = include_background
 
         self.criterion = DiceCELoss(
-            sigmoid=True if not softmax else False,
+            include_background=include_background,
+            sigmoid=not softmax,
+            to_onehot_y=softmax,
             softmax=softmax,
             squared_pred=True,
         )
-        self.dice_metric = DiceMetric(include_background=True, reduction="none")
+        self.dice_metric = DiceMetric(
+            include_background=include_background, reduction="none"
+        )
         self.hd95_metric = HausdorffDistanceMetric(
-            include_background=True,
+            include_background=include_background,
             distance_metric="euclidean",
             percentile=95,
             reduction="none",
         )
 
-        self.postprocess = Compose(
-            [
-                Activations(sigmoid=True if not softmax else False, softmax=softmax),
-                AsDiscrete(threshold=0.5),
-            ]
+        self.post_pred = (
+            Compose([AsDiscrete(argmax=True, to_onehot=num_output_channels)])
+            if softmax
+            else Compose(
+                [
+                    Activations(
+                        sigmoid=True if not softmax else False, softmax=softmax
+                    ),
+                    AsDiscrete(threshold=0.5),
+                ]
+            )
         )
+
+        self.post_label = Compose([AsDiscrete(to_onehot=num_output_channels)])
 
         self.save_hyperparameters()
 
@@ -61,12 +80,13 @@ class System(pl.LightningModule):
         y_hat, y = self.infer_batch(batch, val=True)
         loss = self.criterion(y_hat, y)
 
+        if self.softmax:
+            y = self.post_label(y)
+
         y_hat_binarized = self.postprocess(y_hat)
 
         self.dice_metric(y_hat_binarized, y)
-
-        if batch_idx % 10 == 0:
-            self.hd95_metric(y_hat_binarized, y)
+        self.hd95_metric(y_hat_binarized, y)
 
         self.log("val_loss", loss, sync_dist=True)
 
