@@ -1,6 +1,8 @@
 class_path: system.System
 init_args:
   softmax: true
+  include_background: false
+  num_output_channels: 3
   net:
     class_path: monai.networks.nets.SegResNet
     init_args:

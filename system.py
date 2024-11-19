@@ -4,6 +4,7 @@ from monai.metrics import DiceMetric, HausdorffDistanceMetric
 from monai.losses.dice import DiceCELoss
 from monai.inferers import Inferer
 from monai.transforms import Compose, Activations, AsDiscrete
+from monai.data.utils import decollate_batch
 
 
 class System(pl.LightningModule):
@@ -81,7 +82,7 @@ class System(pl.LightningModule):
         loss = self.criterion(y_hat, y)
 
         if self.softmax:
-            y = self.post_label(y)
+            y = [self.post_label(i) for i in decollate_batch(y)]
 
         y_hat_binarized = self.postprocess(y_hat)
 
