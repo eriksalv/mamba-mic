@@ -7,7 +7,7 @@ init_args:
     class_path: monai.networks.nets.SegResNet
     init_args:
       in_channels: 1
-      out_channels: 2
+      out_channels: 3
       spatial_dims: 3
       init_filters: 32
       blocks_down: [1, 2, 2, 4]

@@ -82,12 +82,15 @@ class System(pl.LightningModule):
         loss = self.criterion(y_hat, y)
 
         if self.softmax:
-            y = [self.post_label(i) for i in decollate_batch(y)]
-
-        y_hat_binarized = self.postprocess(y_hat)
+            y_hat_binarized = [self.post_pred(y_hat[0]) for i in range(y_hat.shape[0])]
+            y = [self.post_label(y[i]) for i in range(y.shape[0])]
+        else:
+            y_hat_binarized = self.post_pred(y_hat)
 
         self.dice_metric(y_hat_binarized, y)
-        self.hd95_metric(y_hat_binarized, y)
+
+        if not self.softmax:
+            self.hd95_metric(y_hat_binarized, y)
 
         self.log("val_loss", loss, sync_dist=True)
 
@@ -95,13 +98,11 @@ class System(pl.LightningModule):
 
     def on_validation_epoch_end(self):
         per_channel_dice = self.dice_metric.aggregate().nanmean(dim=0)
-        per_channel_hd95 = self.hd95_metric.aggregate().nanmean(dim=0)
 
         self.dice_metric.reset()
-        self.hd95_metric.reset()
 
         self.log_dict(
-            {"val_dice": per_channel_dice.mean(), "val_hd95": per_channel_hd95.mean()},
+            {"val_dice": per_channel_dice.mean()},
             sync_dist=True,
         )
 
@@ -110,10 +111,27 @@ class System(pl.LightningModule):
             self.log_dict(
                 {
                     f"channel{i}/val_dice": per_channel_dice[i],
-                    f"channel{i}/val_hd95": per_channel_hd95[i],
                 },
                 sync_dist=True,
             )
+        
+        if not self.softmax:
+            per_channel_hd95 = self.hd95_metric.aggregate().nanmean(dim=0)
+
+            self.hd95_metric.reset()
+
+            self.log_dict(
+                {"val_hd95": per_channel_hd95.mean()},
+                sync_dist=True,
+            )
+
+            for i in range(num_channels):
+                self.log_dict(
+                    {
+                        f"channel{i}/val_hd95": per_channel_hd95[i],
+                    },
+                    sync_dist=True,
+                )
 
     def configure_optimizers(self):
         optimizer = torch.optim.AdamW(self.parameters(), lr=self.lr)
