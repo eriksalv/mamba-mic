@@ -45,6 +45,7 @@ class HNTSMRGDataModule(pl.LightningDataModule):
                         pixdim=(0.5, 0.5, 1.2),
                         mode=("bilinear", "nearest"),
                     ),
+                    T.Resized(keys=["image", "label"], spatial_size=(256, 256, 256)),
                     T.ScaleIntensityd(keys="image", minv=0, maxv=1),
                 ]
             )
