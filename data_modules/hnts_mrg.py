@@ -43,9 +43,6 @@ class HNTSMRGDataModule(pl.LightningDataModule):
                         mode=("bilinear", "nearest"),
                     ),
                     T.Resized(keys=["image", "label"], spatial_size=[512, 512, 124]),
-                    T.NormalizeIntensityd(
-                        keys="image", nonzero=True, channel_wise=True
-                    ),
                     T.AsDiscreted(keys="label", to_onehot=3),
                 ]
             )
@@ -68,6 +65,9 @@ class HNTSMRGDataModule(pl.LightningDataModule):
                     T.RandFlipd(keys=["image", "label"], prob=0.5, spatial_axis=0),
                     T.RandFlipd(keys=["image", "label"], prob=0.5, spatial_axis=1),
                     T.RandFlipd(keys=["image", "label"], prob=0.5, spatial_axis=2),
+                    T.NormalizeIntensityd(
+                        keys="image", nonzero=True, channel_wise=True
+                    ),
                     T.RandScaleIntensityd(keys="image", factors=0.1, prob=1.0),
                     T.RandShiftIntensityd(keys="image", offsets=0.1, prob=1.0),
                 ]
@@ -128,14 +128,30 @@ class HNTSMRGDataModule(pl.LightningDataModule):
                 cache_rate=self.cache_rate,
             )
             self.val_set = CacheDataset(
-                val_subjects, transform=self.preprocess, cache_rate=0
+                val_subjects, 
+                transform=T.Compose(
+                    [
+                        self.preprocess,
+                        T.NormalizeIntensityd(
+                            keys="image", nonzero=True, channel_wise=True
+                        ),
+                    ]
+                ),
+                cache_rate=0
             )
 
         # Assign test dataset for use in dataloader(s)
         if stage == "test" or stage is None:
             self.test_set = CacheDataset(
                 self.test_subjects,
-                transform=self.preprocess,
+                transform=T.Compose(
+                    [
+                        self.preprocess,
+                        T.NormalizeIntensityd(
+                            keys="image", nonzero=True, channel_wise=True
+                        ),
+                    ]
+                ),
                 cache_rate=0.0,
             )
 

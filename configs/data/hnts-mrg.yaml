@@ -1,7 +1,63 @@
 class_path: data_modules.hnts_mrg.HNTSMRGDataModule
 init_args:
-  batch_size: 2
-  num_workers: 6
+  batch_size: 4
+  num_workers: 8
   cache_rate: 0
   use_test_for_val: true
   task: preRT
+  augment:
+    class_path: monai.transforms.Compose
+    init_args:
+      transforms:
+        - class_path: monai.transforms.RandCropByLabelClassesd
+          init_args:
+            keys: ["image", "label"]
+            label_key: label
+            spatial_size: [192, 192, 48]
+            ratios: [1, 1, 1]
+            num_classes: 3
+            image_key: image
+            image_threshold: 0
+            num_samples: 1
+        - class_path: monai.transforms.RandFlipd
+          init_args:
+            keys: ["image", "label"]
+            prob: 0.2
+            spatial_axis: 0
+        - class_path: monai.transforms.RandFlipd
+          init_args:
+            keys: ["image", "label"]
+            prob: 0.2
+            spatial_axis: 1
+        - class_path: monai.transforms.RandFlipd
+          init_args:
+            keys: ["image", "label"]
+            prob: 0.2
+            spatial_axis: 2
+        - class_path: monai.transforms.NormalizeIntensityd
+          init_args:
+            keys: image
+            nonzero: true
+            channel_wise: true
+        - class_path: monai.transforms.RandGaussianNoised
+          init_args:
+            keys: image
+            prob: 0.1
+            std: 0.01
+        - class_path: monai.transforms.RandAdjustContrastd
+          init_args:
+            keys: image
+            prob: 0.2
+            gamma: 2
+        - class_path: monai.transforms.RandScaleIntensityd
+          init_args:
+            keys: image
+            factors: 0.1
+            prob: 0.5
+            channel_wise: true
+        - class_path: monai.transforms.RandShiftIntensityd
+          init_args:
+            keys: image
+            offsets: 0.1
+            prob: 0.5
+            channel_wise: true
