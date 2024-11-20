@@ -1,0 +1,7 @@
+class_path: data_modules.hnts_mrg.HNTSMRGDataModule
+init_args:
+  batch_size: 2
+  num_workers: 6
+  cache_rate: 0
+  use_test_for_val: true
+  task: preRT

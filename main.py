@@ -18,7 +18,7 @@ class MyLightningCLI(LightningCLI):
             project=wandb_config["project"],
             name=wandb_config["name"],
         )
-        # wandb.watch(self.model, log_freq=100)
+        wandb.watch(self.model, log_freq=10)
 
 
 def cli_main():

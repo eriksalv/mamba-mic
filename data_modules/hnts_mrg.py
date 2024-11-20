@@ -20,7 +20,6 @@ class HNTSMRGDataModule(pl.LightningDataModule):
         cache_rate=0.0,
         preprocess=None,
         augment=None,
-        postprocess=None,
     ):
         super().__init__()
         self.data_dir = data_dir
@@ -37,16 +36,20 @@ class HNTSMRGDataModule(pl.LightningDataModule):
             else T.Compose(
                 [
                     T.LoadImaged(keys=["image", "label"]),
-                    T.EnsureChannelFirstd(keys="image", channel_dim="no_channel"),
-                    ConvertToMultiChannelBasedOnHNTSMRGClassesd(keys="label"),
+                    T.EnsureChannelFirstd(keys=["image", "label"]),
                     T.Orientationd(keys=["image", "label"], axcodes="RAS"),
                     T.Spacingd(
                         keys=["image", "label"],
                         pixdim=(0.5, 0.5, 1.2),
                         mode=("bilinear", "nearest"),
                     ),
+<<<<<<< HEAD
                     T.Resized(keys=["image", "label"], spatial_size=(256, 256, 256)),
                     T.ScaleIntensityd(keys="image", minv=0, maxv=1),
+=======
+                    T.Resized(keys=["image", "label"], spatial_size=[512,512,124]),
+                    T.NormalizeIntensityd(keys="image", nonzero=True, channel_wise=True),
+>>>>>>> origin/main
                 ]
             )
         )
@@ -55,10 +58,15 @@ class HNTSMRGDataModule(pl.LightningDataModule):
             if augment is not None
             else T.Compose(
                 [
-                    T.RandSpatialCropd(
-                        keys=["image", "label"],
-                        roi_size=[192, 192, 48],
-                        random_size=False,
+                    T.RandCropByPosNegLabeld(
+                        keys=["image", "label"], 
+                        label_key="label", 
+                        image_key="image",
+                        pos=2,
+                        neg=1,
+                        spatial_size=[192, 192, 48], 
+                        num_samples=4,
+                        image_threshold=0,
                     ),
                     T.RandFlipd(keys=["image", "label"], prob=0.5, spatial_axis=0),
                     T.RandFlipd(keys=["image", "label"], prob=0.5, spatial_axis=1),
@@ -68,15 +76,15 @@ class HNTSMRGDataModule(pl.LightningDataModule):
                 ]
             )
         )
-        self.postprocess = (
-            postprocess
-            if postprocess is not None
-            else T.Compose(
-                [
-                    T.Activations(softmax=True),
-                    T.AsDiscrete(threshold=0.5),
-                ]
-            )
+        self.post_pred = T.Compose(        
+            [
+                T.AsDiscrete(argmax=True, to_onehot=3),
+            ]
+        )
+        self.post_label = T.Compose(        
+            [
+                T.AsDiscrete(to_onehot=3),
+            ]
         )
 
         self.train_subjects = None
@@ -162,18 +170,3 @@ class HNTSMRGDataModule(pl.LightningDataModule):
 
     def test_dataloader(self):
         return DataLoader(self.test_set, batch_size=self.batch_size)
-
-
-class ConvertToMultiChannelBasedOnHNTSMRGClassesd(T.MapTransform):
-    """
-    Converts non-overlapping HNTS-MRG 2024 labels (Primary tumour, lymph nodes) into multi-channels
-    """
-
-    def __call__(self, data):
-        d = dict(data)
-        for key in self.keys:
-            result = []
-            result.append(d[key] == 1)
-            result.append(d[key] == 2)
-            d[key] = torch.stack(result, axis=0).squeeze().float()
-        return d
