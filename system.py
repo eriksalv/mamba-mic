@@ -4,7 +4,6 @@ from monai.metrics import DiceMetric, HausdorffDistanceMetric
 from monai.losses.dice import DiceCELoss
 from monai.inferers import Inferer
 from monai.transforms import Compose, Activations, AsDiscrete
-from monai.data.utils import decollate_batch
 
 
 class System(pl.LightningModule):
@@ -24,10 +23,13 @@ class System(pl.LightningModule):
         self.softmax = softmax
         self.include_background = include_background
 
+        assert (num_output_channels is None and softmax is False) or (
+            num_output_channels is not None and softmax is True
+        ), "num_output_channels should only be set if softmax is True"
+
         self.criterion = DiceCELoss(
             include_background=include_background,
             sigmoid=not softmax,
-            to_onehot_y=softmax,
             softmax=softmax,
             squared_pred=True,
         )
@@ -42,7 +44,7 @@ class System(pl.LightningModule):
         )
 
         self.post_pred = (
-            Compose([AsDiscrete(argmax=True, to_onehot=num_output_channels)])
+            Compose([AsDiscrete(argmax=True, dim=1, to_onehot=num_output_channels)])
             if softmax
             else Compose(
                 [
@@ -54,19 +56,22 @@ class System(pl.LightningModule):
             )
         )
 
-        self.post_label = Compose([AsDiscrete(to_onehot=num_output_channels)])
-
         self.save_hyperparameters()
 
     def forward(self, x):
         return self.net(x)
 
     def infer_batch(self, batch, val=False):
+        if isinstance(batch, list):
+            batch = batch[0]
+
         x, y = batch["image"], batch["label"]
+
         if val is False:
             y_hat = self(x)
         else:
             y_hat = self.val_inferer(inputs=x, network=self.net)
+            
         return y_hat, y
 
     def training_step(self, batch, batch_idx):
@@ -81,10 +86,7 @@ class System(pl.LightningModule):
         y_hat, y = self.infer_batch(batch, val=True)
         loss = self.criterion(y_hat, y)
 
-        if self.softmax:
-            y = [self.post_label(i) for i in decollate_batch(y)]
-
-        y_hat_binarized = self.postprocess(y_hat)
+        y_hat_binarized = self.post_pred(y_hat)
 
         self.dice_metric(y_hat_binarized, y)
         self.hd95_metric(y_hat_binarized, y)
