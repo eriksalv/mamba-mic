@@ -2,7 +2,6 @@ import lightning.pytorch as pl
 from monai.data import CacheDataset
 from monai import transforms as T
 from torch.utils.data import DataLoader, random_split
-import torch
 from glob import glob
 import os
 from typing import Literal
@@ -43,8 +42,11 @@ class HNTSMRGDataModule(pl.LightningDataModule):
                         pixdim=(0.5, 0.5, 1.2),
                         mode=("bilinear", "nearest"),
                     ),
-                    T.Resized(keys=["image", "label"], spatial_size=[512,512,124]),
-                    T.NormalizeIntensityd(keys="image", nonzero=True, channel_wise=True),
+                    T.Resized(keys=["image", "label"], spatial_size=[512, 512, 124]),
+                    T.NormalizeIntensityd(
+                        keys="image", nonzero=True, channel_wise=True
+                    ),
+                    T.AsDiscreted(keys="label", to_onehot=3),
                 ]
             )
         )
@@ -53,15 +55,15 @@ class HNTSMRGDataModule(pl.LightningDataModule):
             if augment is not None
             else T.Compose(
                 [
-                    T.RandCropByPosNegLabeld(
-                        keys=["image", "label"], 
-                        label_key="label", 
+                    T.RandCropByLabelClassesd(
+                        keys=["image", "label"],
+                        label_key="label",
+                        spatial_size=[192, 192, 48],
+                        ratios=[1, 1, 1],
+                        num_classes=3,
                         image_key="image",
-                        pos=2,
-                        neg=1,
-                        spatial_size=[192, 192, 48], 
-                        num_samples=4,
                         image_threshold=0,
+                        num_samples=1,
                     ),
                     T.RandFlipd(keys=["image", "label"], prob=0.5, spatial_axis=0),
                     T.RandFlipd(keys=["image", "label"], prob=0.5, spatial_axis=1),
@@ -70,16 +72,6 @@ class HNTSMRGDataModule(pl.LightningDataModule):
                     T.RandShiftIntensityd(keys="image", offsets=0.1, prob=1.0),
                 ]
             )
-        )
-        self.post_pred = T.Compose(        
-            [
-                T.AsDiscrete(argmax=True, to_onehot=3),
-            ]
-        )
-        self.post_label = T.Compose(        
-            [
-                T.AsDiscrete(to_onehot=3),
-            ]
         )
 
         self.train_subjects = None
