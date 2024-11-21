@@ -2,7 +2,7 @@ class_path: data_modules.hnts_mrg.HNTSMRGDataModule
 init_args:
   batch_size: 2
   num_workers: 6
-  cache_rate: 0
+  cache_rate: 0.3
   use_test_for_val: true
   task: midRT
   preprocess:
@@ -48,7 +48,7 @@ init_args:
             keys: ["image", "label"]
             label_key: label
             spatial_size: [192, 192, 48]
-            ratios: [1, 1, 1]
+            ratios: [1, 2, 2]
             num_classes: 3
             image_key: image
             image_threshold: 0

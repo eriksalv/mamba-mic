@@ -105,11 +105,58 @@ class HNTSMRGDataModule(pl.LightningDataModule):
         self.train_subjects = []
         self.test_subjects = []
 
-        for t2, mask in zip(train_t2_paths, train_mask_paths, strict=True):
-            self.train_subjects.append({"image": t2, "label": mask})
+        if self.task == "preRT":
+            for t2, mask in zip(train_t2_paths, train_mask_paths, strict=True):
+                self.train_subjects.append({"image": t2, "label": mask})
 
-        for t2, mask in zip(test_t2_paths, test_mask_paths, strict=True):
-            self.test_subjects.append({"image": t2, "label": mask})
+            for t2, mask in zip(test_t2_paths, test_mask_paths, strict=True):
+                self.test_subjects.append({"image": t2, "label": mask})
+
+        elif self.task == "midRT":
+            train_t2_registered_paths = sorted(
+                glob(os.path.join(self.data_dir, "train", "*", self.task, "*_T2_registered.nii.gz"))
+            )
+            test_t2_registered_paths = sorted(
+                glob(os.path.join(self.data_dir, "test", "*", self.task, "*_T2_registered.nii.gz"))
+            )
+            train_mask_registered_paths = sorted(
+                glob(os.path.join(self.data_dir, "train", "*", self.task, "*_mask_registered.nii.gz"))
+            )
+            test_mask_registered_paths = sorted(
+                glob(os.path.join(self.data_dir, "test", "*", self.task, "*_mask_registered.nii.gz"))
+            )
+
+            for t2, mask, t2_registered, mask_registered in zip(
+                train_t2_paths,
+                train_mask_paths,
+                train_t2_registered_paths,
+                train_mask_registered_paths,
+                strict=True,
+            ):
+                self.train_subjects.append(
+                    {
+                        "t2": t2,
+                        "label": mask,
+                        "t2_registered": t2_registered,
+                        "mask_registered": mask_registered,
+                    }
+                )
+
+            for t2, mask, t2_registered, mask_registered in zip(
+                test_t2_paths,
+                test_mask_paths,
+                test_t2_registered_paths,
+                test_mask_registered_paths,
+                strict=True,
+            ):
+                self.test_subjects.append(
+                    {
+                        "t2": t2,
+                        "label": mask,
+                        "t2_registered": t2_registered,
+                        "mask_registered": mask_registered,
+                    }
+                )
 
     def setup(self, stage=None):
         # Assign train/val datasets for use in dataloaders
