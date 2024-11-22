@@ -6,17 +6,16 @@ from data_modules.brats2024 import (
     BraTS2024DataModule,
     ConvertToMultiChannelBasedOnBratsClassesd,
 )
-import tqdm
+from tqdm import tqdm
 import re
 import nibabel as nib
-import numpy as np
 
 
 def generate_submission(args):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     run = wandb.init(
-        project=args.project,
+        project="brats2024",
         name=args.name,
         job_type="submission",
     )
@@ -61,7 +60,10 @@ def generate_submission(args):
             ).inverse({"label": test_output})
 
             nib.save(
-                nib.Nifti1Image(test_output["label"].cpu().numpy(), affine=np.eye(4)),
+                nib.Nifti1Image(
+                    test_output["label"].type(torch.float).cpu().numpy(),
+                    affine=sample["image"].meta["affine"],
+                ),
                 f"./data/BRATS2024/{sub_path}.nii.gz",
             )
 
@@ -72,6 +74,7 @@ if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser()
+    parser.add_argument("--name", required=True)
     parser.add_argument("--local", action=argparse.BooleanOptionalAction, default=False)
     parser.add_argument("--model-ckpt", required=True)
     args = parser.parse_args()

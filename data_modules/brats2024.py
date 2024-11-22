@@ -225,6 +225,10 @@ class ConvertToMultiChannelBasedOnBratsClassesd(T.MapTransform):
         for key in self.keys:
             if key in data:
                 non_overlapping = [
+                    (d[key][0] == 1)
+                    & (d[key][1] == 0)
+                    & (d[key][2] == 0)
+                    & (d[key][3] == 0),
                     (d[key][1] == 1) & (d[key][0] == 0),
                     (d[key][2] == 1) & (d[key][1] == 0),
                     d[key][0] == 1,
