@@ -31,15 +31,22 @@ class BraTS2024DataModule(pl.LightningDataModule):
             if preprocess is not None
             else T.Compose(
                 [
-                    T.LoadImaged(keys=["t1c", "t1n", "t2f", "t2w", "label"]),
+                    T.LoadImaged(
+                        keys=["t1c", "t1n", "t2f", "t2w", "label"],
+                        allow_missing_keys=True,
+                    ),
                     T.EnsureChannelFirstd(
                         keys=["t1c", "t1n", "t2f", "t2w"],
                         channel_dim="no_channel",
                     ),
                     T.ConcatItemsd(keys=["t1c", "t1n", "t2f", "t2w"], name="image"),
-                    T.SelectItemsd(keys=["image", "label"]),
-                    ConvertToMultiChannelBasedOnBratsClassesd(keys="label"),
-                    T.Orientationd(keys=["image", "label"], axcodes="RAS"),
+                    T.SelectItemsd(keys=["image", "label"], allow_missing_keys=True),
+                    ConvertToMultiChannelBasedOnBratsClassesd(
+                        keys="label", allow_missing_keys=True
+                    ),
+                    T.Orientationd(
+                        keys=["image", "label"], axcodes="RAS", allow_missing_keys=True
+                    ),
                     T.ScaleIntensityd(keys="image", minv=0, maxv=1, channel_wise=True),
                 ]
             )
@@ -51,7 +58,7 @@ class BraTS2024DataModule(pl.LightningDataModule):
                 [
                     T.RandCropByLabelClassesd(
                         keys=["image", "label"],
-                        label_key='label',
+                        label_key="label",
                         spatial_size=[128, 128, 128],
                     ),
                     T.RandFlipd(keys=["image", "label"], prob=0.5, spatial_axis=0),
@@ -196,18 +203,34 @@ class ConvertToMultiChannelBasedOnBratsClassesd(T.MapTransform):
     def __call__(self, data):
         d = dict(data)
         for key in self.keys:
-            result = []
-            # Enhancing Tumour (ET) is label 3
-            result.append(d[key] == 3)
-            # Tumour Core (TC) is ET + NETC (label 3 + 1)
-            result.append(torch.logical_or(d[key] == 3, d[key] == 1))
-            # Whole Tumour (WT) is ET + SNFH + NETC (label 3 + 2 + 1)
-            result.append(
-                torch.logical_or(
-                    torch.logical_or(d[key] == 3, d[key] == 2), d[key] == 1
+            if key in data:
+                result = []
+                # Enhancing Tumour (ET) is label 3
+                result.append(d[key] == 3)
+                # Tumour Core (TC) is ET + NETC (label 3 + 1)
+                result.append(torch.logical_or(d[key] == 3, d[key] == 1))
+                # Whole Tumour (WT) is ET + SNFH + NETC (label 3 + 2 + 1)
+                result.append(
+                    torch.logical_or(
+                        torch.logical_or(d[key] == 3, d[key] == 2), d[key] == 1
+                    )
                 )
-            )
-            # Resection Cavity (RC) is label 4
-            result.append(d[key] == 4)
-            d[key] = torch.stack(result, axis=0).squeeze().float()
+                # Resection Cavity (RC) is label 4
+                result.append(d[key] == 4)
+                d[key] = torch.stack(result, axis=0).squeeze().float()
+        return d
+
+    def inverse(self, data):
+        d = dict(data)
+        for key in self.keys:
+            if key in data:
+                non_overlapping = [
+                    (d[key][1] == 1) & (d[key][0] == 0),
+                    (d[key][2] == 1) & (d[key][1] == 0),
+                    d[key][0] == 1,
+                    d[key][3] == 1,
+                ]
+                multi_channel = torch.stack(non_overlapping, axis=0).squeeze().float()
+                result = torch.argmax(multi_channel, dim=0)
+                d[key] = result
         return d
