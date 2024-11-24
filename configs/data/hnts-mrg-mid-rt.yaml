@@ -2,7 +2,7 @@ class_path: data_modules.hnts_mrg.HNTSMRGDataModule
 init_args:
   batch_size: 2
   num_workers: 6
-  cache_rate: 0.3
+  cache_rate: 0
   use_test_for_val: true
   task: midRT
   preprocess:
@@ -11,13 +11,13 @@ init_args:
       transforms:
         - class_path: monai.transforms.LoadImaged
           init_args:
-            keys: ["t2", "t2_registered", "mask_registered", "label"]
+            keys: ["t2", "t2_registered", "label"]
         - class_path: monai.transforms.EnsureChannelFirstd
           init_args:
-            keys: ["t2", "t2_registered", "mask_registered", "label"]
+            keys: ["t2", "t2_registered", "label"]
         - class_path: monai.transforms.ConcatItemsd
           init_args:
-            keys: ["t2", "t2_registered", "mask_registered"]
+            keys: ["t2", "t2_registered"]
             name: image
         - class_path: monai.transforms.SelectItemsd
           init_args:

@@ -2,20 +2,17 @@ wandb:
   project: monai-runs
   name: example
 trainer:
-  max_epochs: 500
+  max_epochs: 1000
   devices: auto
   accelerator: auto
   # max_time: 00:12:00:00
   precision: 32
   log_every_n_steps: 5
-  check_val_every_n_epoch: 3
+  check_val_every_n_epoch: 5
   logger:
     - class_path: lightning.pytorch.loggers.WandbLogger
       init_args:
         log_model: true
-    - class_path: lightning.pytorch.loggers.TensorBoardLogger
-      init_args:
-        save_dir: tb_logs
   callbacks:
     - class_path: lightning.pytorch.callbacks.ModelCheckpoint
       init_args:
@@ -28,11 +25,13 @@ trainer:
       init_args:
         logging_interval: epoch
 optimizer:
-  class_path: torch.optim.AdamW
+  class_path: torch.optim.SGD
   init_args:
-    lr: 0.0004
+    lr: 0.01
+    momentum: 0.9
+    nesterov: true
 lr_scheduler:
   class_path: torch.optim.lr_scheduler.CosineAnnealingLR
   init_args:
-    T_max: 500
+    T_max: 1000
     eta_min: 0.000001
