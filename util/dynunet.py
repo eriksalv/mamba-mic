@@ -38,6 +38,4 @@ def get_kernels_strides(sizes=[128, 128, 128], spacings=[1.0, 1.0, 1.0]):
 
 
 if __name__ == "__main__":
-    print(get_kernels_strides())
-
-    dynunet = DynUNet()
+    print(get_kernels_strides(sizes=[192, 192, 48], spacings=[0.5, 0.5, 1.2]))

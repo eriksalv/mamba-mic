@@ -1,5 +1,5 @@
 wandb:
-  project: monai-runs
+  project: brats2024
   name: example
 trainer:
   max_epochs: 500
@@ -8,21 +8,18 @@ trainer:
   # max_time: 00:12:00:00
   precision: 32
   log_every_n_steps: 5
-  check_val_every_n_epoch: 3
+  check_val_every_n_epoch: 5
   logger:
     - class_path: lightning.pytorch.loggers.WandbLogger
       init_args:
         log_model: true
-    - class_path: lightning.pytorch.loggers.TensorBoardLogger
-      init_args:
-        save_dir: tb_logs
   callbacks:
     - class_path: lightning.pytorch.callbacks.ModelCheckpoint
       init_args:
         save_top_k: 3
-        monitor: val_loss
-        mode: min
-        filename: model-{epoch:02d}-{val_loss:.2f}
+        monitor: val_dice
+        mode: max
+        filename: model-{epoch:02d}-{val_dice:.2f}
         verbose: true
     - class_path: lightning.pytorch.callbacks.LearningRateMonitor
       init_args:

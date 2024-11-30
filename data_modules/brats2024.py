@@ -12,7 +12,8 @@ class BraTS2024DataModule(pl.LightningDataModule):
         self,
         batch_size: int,
         data_dir="./data/BRATS2024",
-        val_frac=0.15,
+        val_frac=0.1,
+        test_frac=0.1,
         num_workers=4,
         cache_rate=0.0,
         preprocess=None,
@@ -23,6 +24,7 @@ class BraTS2024DataModule(pl.LightningDataModule):
         self.data_dir = data_dir
         self.batch_size = batch_size
         self.val_frac = val_frac
+        self.test_frac = test_frac
         self.num_workers = num_workers
         self.cache_rate = cache_rate
 
@@ -31,16 +33,21 @@ class BraTS2024DataModule(pl.LightningDataModule):
             if preprocess is not None
             else T.Compose(
                 [
-                    T.LoadImaged(keys=["t1c", "t1n", "t2f", "t2w", "label"]),
+                    T.LoadImaged(
+                        keys=["t1c", "t1n", "t2f", "t2w", "label"],
+                        allow_missing_keys=True,
+                    ),
                     T.EnsureChannelFirstd(
-                        keys=["t1c", "t1n", "t2f", "t2w"],
-                        channel_dim="no_channel",
+                        keys=["t1c", "t1n", "t2f", "t2w", "label"],
                     ),
                     T.ConcatItemsd(keys=["t1c", "t1n", "t2f", "t2w"], name="image"),
-                    T.SelectItemsd(keys=["image", "label"]),
-                    ConvertToMultiChannelBasedOnBratsClassesd(keys="label"),
-                    T.Orientationd(keys=["image", "label"], axcodes="RAS"),
-                    T.ScaleIntensityd(keys="image", minv=0, maxv=1, channel_wise=True),
+                    T.SelectItemsd(keys=["image", "label"], allow_missing_keys=True),
+                    ConvertToMultiChannelBasedOnBratsClassesd(
+                        keys="label", allow_missing_keys=True
+                    ),
+                    T.Orientationd(
+                        keys=["image", "label"], axcodes="RAS", allow_missing_keys=True
+                    )
                 ]
             )
         )
@@ -49,14 +56,13 @@ class BraTS2024DataModule(pl.LightningDataModule):
             if augment is not None
             else T.Compose(
                 [
-                    T.RandCropByLabelClassesd(
-                        keys=["image", "label"],
-                        label_key='label',
-                        spatial_size=[128, 128, 128],
-                    ),
+                    T.CropForegroundd(keys=["image", "label"], source_key="image"),
+                    T.SpatialPadd(keys=["image", "label"], spatial_size=[128, 128, 128]),
+                    T.RandSpatialCropd(keys=["image", "label"], roi_size=[128, 128, 128]),
                     T.RandFlipd(keys=["image", "label"], prob=0.5, spatial_axis=0),
                     T.RandFlipd(keys=["image", "label"], prob=0.5, spatial_axis=1),
                     T.RandFlipd(keys=["image", "label"], prob=0.5, spatial_axis=2),
+                    T.NormalizeIntensityd(keys="image", channel_wise=True),
                     T.RandScaleIntensityd(keys="image", factors=0.1, prob=1.0),
                     T.RandShiftIntensityd(keys="image", offsets=0.1, prob=1.0),
                 ]
@@ -145,25 +151,44 @@ class BraTS2024DataModule(pl.LightningDataModule):
             )
 
     def setup(self, stage=None):
+        train_subjects, val_subjects, test_subjects = random_split(
+            self.subjects_with_ground_truth,
+            [1 - self.val_frac - self.test_frac, self.val_frac, self.test_frac], 
+            generator=torch.Generator().manual_seed(42)
+        )
+        # Sanity check
+        print(train_subjects[0]['t1c'])
+        print(val_subjects[0]['t1c'])
+        print(test_subjects[0]['t1c'])
+
         # Assign train/val datasets for use in dataloaders
         if stage == "fit" or stage is None:
-            train_subjects, val_subjects = random_split(
-                self.subjects_with_ground_truth, [1 - self.val_frac, self.val_frac]
-            )
             self.train_set = CacheDataset(
                 train_subjects,
                 transform=T.Compose([self.preprocess, self.augment]),
                 cache_rate=self.cache_rate,
             )
             self.val_set = CacheDataset(
-                val_subjects, transform=self.preprocess, cache_rate=0
+                val_subjects, 
+                transform=T.Compose(
+                    [
+                        self.preprocess,
+                        T.NormalizeIntensityd(keys="image", channel_wise=True)
+                    ]
+                ), 
+                cache_rate=0.0
             )
 
         # Assign test dataset for use in dataloader(s)
         if stage == "test" or stage is None:
             self.test_set = CacheDataset(
-                self.subjects_without_ground_truth,
-                transform=self.preprocess,
+                test_subjects,
+                transform=T.Compose(
+                    [
+                        self.preprocess,
+                        T.NormalizeIntensityd(keys="image", channel_wise=True)
+                    ]
+                ),
                 cache_rate=0.0,
             )
 
@@ -196,18 +221,38 @@ class ConvertToMultiChannelBasedOnBratsClassesd(T.MapTransform):
     def __call__(self, data):
         d = dict(data)
         for key in self.keys:
-            result = []
-            # Enhancing Tumour (ET) is label 3
-            result.append(d[key] == 3)
-            # Tumour Core (TC) is ET + NETC (label 3 + 1)
-            result.append(torch.logical_or(d[key] == 3, d[key] == 1))
-            # Whole Tumour (WT) is ET + SNFH + NETC (label 3 + 2 + 1)
-            result.append(
-                torch.logical_or(
-                    torch.logical_or(d[key] == 3, d[key] == 2), d[key] == 1
+            if key in data:
+                result = []
+                # Enhancing Tumour (ET) is label 3
+                result.append(d[key][0] == 3)
+                # Tumour Core (TC) is ET + NETC (label 3 + 1)
+                result.append(torch.logical_or(d[key][0] == 3, d[key][0] == 1))
+                # Whole Tumour (WT) is ET + SNFH + NETC (label 3 + 2 + 1)
+                result.append(
+                    torch.logical_or(
+                        torch.logical_or(d[key][0] == 3, d[key][0] == 2), d[key][0] == 1
+                    )
                 )
-            )
-            # Resection Cavity (RC) is label 4
-            result.append(d[key] == 4)
-            d[key] = torch.stack(result, axis=0).squeeze().float()
+                # Resection Cavity (RC) is label 4
+                result.append(d[key][0] == 4)
+                d[key] = torch.stack(result, axis=0).squeeze().float()
+        return d
+
+    def inverse(self, data):
+        d = dict(data)
+        for key in self.keys:
+            if key in data:
+                non_overlapping = [
+                    (d[key][0] == 1)
+                    & (d[key][1] == 0)
+                    & (d[key][2] == 0)
+                    & (d[key][3] == 0),
+                    (d[key][1] == 1) & (d[key][0] == 0),
+                    (d[key][2] == 1) & (d[key][1] == 0),
+                    d[key][0] == 1,
+                    d[key][3] == 1,
+                ]
+                multi_channel = torch.stack(non_overlapping, axis=0).squeeze().float()
+                result = torch.argmax(multi_channel, dim=0)
+                d[key] = result
         return d

@@ -1,0 +1,589 @@
+{
+  "net": {
+    "value": {
+      "init_args": {
+        "dropout": null,
+        "filters": null,
+        "strides": [
+          1,
+          2,
+          2,
+          2,
+          2
+        ],
+        "act_name": [
+          "leakyrelu",
+          {
+            "inplace": true,
+            "negative_slope": 0.01
+          }
+        ],
+        "norm_name": [
+          "INSTANCE",
+          {
+            "affine": true
+          }
+        ],
+        "res_block": false,
+        "trans_bias": false,
+        "in_channels": 2,
+        "kernel_size": [
+          3,
+          3,
+          3,
+          3,
+          3
+        ],
+        "out_channels": 3,
+        "spatial_dims": 3,
+        "deep_supr_num": 1,
+        "deep_supervision": false,
+        "upsample_kernel_size": [
+          2,
+          2,
+          2,
+          2
+        ]
+      },
+      "class_path": "monai.networks.nets.DynUNet"
+    }
+  },
+  "data": {
+    "value": {
+      "init_args": {
+        "task": "midRT",
+        "augment": {
+          "init_args": {
+            "lazy": false,
+            "log_stats": false,
+            "map_items": true,
+            "overrides": null,
+            "transforms": [
+              {
+                "init_args": {
+                  "keys": [
+                    "image",
+                    "label"
+                  ],
+                  "ratios": [
+                    1,
+                    2,
+                    2
+                  ],
+                  "image_key": "image",
+                  "label_key": "label",
+                  "num_classes": 3,
+                  "num_samples": 1,
+                  "spatial_size": [
+                    192,
+                    192,
+                    48
+                  ],
+                  "image_threshold": 0
+                },
+                "class_path": "monai.transforms.RandCropByLabelClassesd"
+              },
+              {
+                "init_args": {
+                  "keys": [
+                    "image",
+                    "label"
+                  ],
+                  "prob": 0.2,
+                  "spatial_axis": 0
+                },
+                "class_path": "monai.transforms.RandFlipd"
+              },
+              {
+                "init_args": {
+                  "keys": [
+                    "image",
+                    "label"
+                  ],
+                  "prob": 0.2,
+                  "spatial_axis": 1
+                },
+                "class_path": "monai.transforms.RandFlipd"
+              },
+              {
+                "init_args": {
+                  "keys": [
+                    "image",
+                    "label"
+                  ],
+                  "prob": 0.2,
+                  "spatial_axis": 2
+                },
+                "class_path": "monai.transforms.RandFlipd"
+              },
+              {
+                "init_args": {
+                  "keys": "image",
+                  "nonzero": true,
+                  "channel_wise": true
+                },
+                "class_path": "monai.transforms.NormalizeIntensityd"
+              },
+              {
+                "init_args": {
+                  "std": 0.01,
+                  "keys": "image",
+                  "prob": 0.1
+                },
+                "class_path": "monai.transforms.RandGaussianNoised"
+              },
+              {
+                "init_args": {
+                  "keys": "image",
+                  "prob": 0.2,
+                  "gamma": 2
+                },
+                "class_path": "monai.transforms.RandAdjustContrastd"
+              },
+              {
+                "init_args": {
+                  "keys": "image",
+                  "prob": 0.5,
+                  "factors": 0.1,
+                  "channel_wise": true
+                },
+                "class_path": "monai.transforms.RandScaleIntensityd"
+              },
+              {
+                "init_args": {
+                  "keys": "image",
+                  "prob": 0.5,
+                  "offsets": 0.1,
+                  "channel_wise": true
+                },
+                "class_path": "monai.transforms.RandShiftIntensityd"
+              }
+            ],
+            "unpack_items": false
+          },
+          "class_path": "monai.transforms.Compose"
+        },
+        "data_dir": "/cluster/projects/vc/data/mic/open/HNTS-MRG",
+        "val_frac": 0.15,
+        "batch_size": 2,
+        "cache_rate": 0,
+        "preprocess": {
+          "init_args": {
+            "lazy": false,
+            "log_stats": false,
+            "map_items": true,
+            "overrides": null,
+            "transforms": [
+              {
+                "init_args": {
+                  "keys": [
+                    "t2",
+                    "t2_registered",
+                    "label"
+                  ]
+                },
+                "class_path": "monai.transforms.LoadImaged"
+              },
+              {
+                "init_args": {
+                  "keys": [
+                    "t2",
+                    "t2_registered",
+                    "label"
+                  ]
+                },
+                "class_path": "monai.transforms.EnsureChannelFirstd"
+              },
+              {
+                "init_args": {
+                  "keys": [
+                    "t2",
+                    "t2_registered"
+                  ],
+                  "name": "image"
+                },
+                "class_path": "monai.transforms.ConcatItemsd"
+              },
+              {
+                "init_args": {
+                  "keys": [
+                    "image",
+                    "label"
+                  ]
+                },
+                "class_path": "monai.transforms.SelectItemsd"
+              },
+              {
+                "init_args": {
+                  "keys": [
+                    "image",
+                    "label"
+                  ],
+                  "axcodes": "RAS"
+                },
+                "class_path": "monai.transforms.Orientationd"
+              },
+              {
+                "init_args": {
+                  "keys": [
+                    "image",
+                    "label"
+                  ],
+                  "mode": [
+                    "bilinear",
+                    "nearest"
+                  ],
+                  "pixdim": [
+                    0.5,
+                    0.5,
+                    1.2
+                  ]
+                },
+                "class_path": "monai.transforms.Spacingd"
+              },
+              {
+                "init_args": {
+                  "keys": [
+                    "image",
+                    "label"
+                  ],
+                  "spatial_size": [
+                    512,
+                    512,
+                    124
+                  ]
+                },
+                "class_path": "monai.transforms.Resized"
+              },
+              {
+                "init_args": {
+                  "keys": "label",
+                  "to_onehot": 3
+                },
+                "class_path": "monai.transforms.AsDiscreted"
+              }
+            ],
+            "unpack_items": false
+          },
+          "class_path": "monai.transforms.Compose"
+        },
+        "num_workers": 6,
+        "use_test_for_val": true
+      },
+      "class_path": "data_modules.hnts_mrg.HNTSMRGDataModule"
+    }
+  },
+  "model": {
+    "value": {
+      "init_args": {
+        "lr": 0.001,
+        "net": {
+          "init_args": {
+            "dropout": null,
+            "filters": null,
+            "strides": [
+              1,
+              2,
+              2,
+              2,
+              2
+            ],
+            "act_name": [
+              "leakyrelu",
+              {
+                "inplace": true,
+                "negative_slope": 0.01
+              }
+            ],
+            "norm_name": [
+              "INSTANCE",
+              {
+                "affine": true
+              }
+            ],
+            "res_block": false,
+            "trans_bias": false,
+            "in_channels": 2,
+            "kernel_size": [
+              3,
+              3,
+              3,
+              3,
+              3
+            ],
+            "out_channels": 3,
+            "spatial_dims": 3,
+            "deep_supr_num": 1,
+            "deep_supervision": false,
+            "upsample_kernel_size": [
+              2,
+              2,
+              2,
+              2
+            ]
+          },
+          "class_path": "monai.networks.nets.DynUNet"
+        },
+        "softmax": true,
+        "log_hd95": false,
+        "val_inferer": {
+          "init_args": {
+            "cval": 0,
+            "mode": "gaussian",
+            "device": null,
+            "overlap": 0.5,
+            "progress": false,
+            "roi_size": [
+              192,
+              192,
+              48
+            ],
+            "sw_device": null,
+            "buffer_dim": -1,
+            "cpu_thresh": null,
+            "with_coord": false,
+            "sigma_scale": 0.125,
+            "buffer_steps": null,
+            "padding_mode": "CONSTANT",
+            "sw_batch_size": 2,
+            "cache_roi_weight_map": false
+          },
+          "class_path": "monai.inferers.SlidingWindowInferer"
+        },
+        "include_background": false,
+        "num_output_channels": 3
+      },
+      "class_path": "system.System"
+    }
+  },
+  "wandb": {
+    "value": {
+      "name": "dynUnet-midRT",
+      "project": "hnts-mrg"
+    }
+  },
+  "_wandb": {
+    "value": {
+      "m": [],
+      "t": {
+        "1": [
+          1,
+          41,
+          48,
+          55,
+          106
+        ],
+        "2": [
+          1,
+          41,
+          48,
+          55,
+          106
+        ],
+        "3": [
+          1,
+          13,
+          16,
+          23,
+          55
+        ],
+        "4": "3.11.5",
+        "5": "0.18.2",
+        "8": [
+          5
+        ],
+        "12": "0.18.2",
+        "13": "linux-x86_64"
+      },
+      "cli_version": "0.18.2",
+      "python_version": "3.11.5"
+    }
+  },
+  "softmax": {
+    "value": true
+  },
+  "trainer": {
+    "value": {
+      "logger": [
+        {
+          "init_args": {
+            "id": null,
+            "dir": null,
+            "mode": null,
+            "name": null,
+            "tags": null,
+            "force": null,
+            "group": null,
+            "magic": null,
+            "notes": null,
+            "config": null,
+            "entity": null,
+            "prefix": "",
+            "reinit": null,
+            "resume": null,
+            "offline": false,
+            "project": null,
+            "version": null,
+            "job_type": null,
+            "save_dir": ".",
+            "settings": null,
+            "anonymous": null,
+            "fork_from": null,
+            "log_model": true,
+            "save_code": null,
+            "experiment": null,
+            "monitor_gym": null,
+            "resume_from": null,
+            "tensorboard": null,
+            "checkpoint_name": null,
+            "allow_val_change": null,
+            "sync_tensorboard": null,
+            "config_exclude_keys": null,
+            "config_include_keys": null
+          },
+          "class_path": "lightning.pytorch.loggers.WandbLogger"
+        }
+      ],
+      "devices": "auto",
+      "plugins": null,
+      "max_time": null,
+      "profiler": null,
+      "strategy": "auto",
+      "barebones": false,
+      "benchmark": null,
+      "callbacks": [
+        {
+          "init_args": {
+            "mode": "min",
+            "dirpath": null,
+            "monitor": "val_loss",
+            "verbose": true,
+            "filename": "model-{epoch:02d}-{val_loss:.2f}",
+            "save_last": null,
+            "save_top_k": 3,
+            "every_n_epochs": null,
+            "save_weights_only": false,
+            "every_n_train_steps": null,
+            "train_time_interval": null,
+            "enable_version_counter": true,
+            "auto_insert_metric_name": true,
+            "save_on_train_epoch_end": null
+          },
+          "class_path": "lightning.pytorch.callbacks.ModelCheckpoint"
+        },
+        {
+          "init_args": {
+            "log_momentum": false,
+            "log_weight_decay": false,
+            "logging_interval": "epoch"
+          },
+          "class_path": "lightning.pytorch.callbacks.LearningRateMonitor"
+        }
+      ],
+      "max_steps": -1,
+      "min_steps": null,
+      "num_nodes": 1,
+      "precision": 32,
+      "max_epochs": 1000,
+      "min_epochs": null,
+      "accelerator": "auto",
+      "fast_dev_run": false,
+      "deterministic": null,
+      "detect_anomaly": false,
+      "inference_mode": true,
+      "sync_batchnorm": false,
+      "overfit_batches": 0,
+      "default_root_dir": null,
+      "gradient_clip_val": null,
+      "limit_val_batches": null,
+      "log_every_n_steps": 5,
+      "limit_test_batches": null,
+      "val_check_interval": null,
+      "enable_progress_bar": null,
+      "limit_train_batches": null,
+      "enable_checkpointing": null,
+      "enable_model_summary": null,
+      "num_sanity_val_steps": null,
+      "limit_predict_batches": null,
+      "accumulate_grad_batches": 1,
+      "check_val_every_n_epoch": 5,
+      "gradient_clip_algorithm": null,
+      "use_distributed_sampler": true,
+      "reload_dataloaders_every_n_epochs": 0
+    }
+  },
+  "log_hd95": {
+    "value": false
+  },
+  "ckpt_path": {
+    "value": null
+  },
+  "optimizer": {
+    "value": {
+      "init_args": {
+        "lr": 0.01,
+        "fused": null,
+        "foreach": null,
+        "maximize": false,
+        "momentum": 0.9,
+        "nesterov": false,
+        "dampening": 0,
+        "weight_decay": 0,
+        "differentiable": false
+      },
+      "class_path": "torch.optim.SGD"
+    }
+  },
+  "_class_path": {
+    "value": "system.System"
+  },
+  "val_inferer": {
+    "value": {
+      "init_args": {
+        "cval": 0,
+        "mode": "gaussian",
+        "device": null,
+        "overlap": 0.5,
+        "progress": false,
+        "roi_size": [
+          192,
+          192,
+          48
+        ],
+        "sw_device": null,
+        "buffer_dim": -1,
+        "cpu_thresh": null,
+        "with_coord": false,
+        "sigma_scale": 0.125,
+        "buffer_steps": null,
+        "padding_mode": "CONSTANT",
+        "sw_batch_size": 2,
+        "cache_roi_weight_map": false
+      },
+      "class_path": "monai.inferers.SlidingWindowInferer"
+    }
+  },
+  "lr_scheduler": {
+    "value": {
+      "init_args": {
+        "T_max": 1000,
+        "eta_min": 0.000001,
+        "verbose": "deprecated",
+        "last_epoch": -1
+      },
+      "class_path": "torch.optim.lr_scheduler.CosineAnnealingLR"
+    }
+  },
+  "_instantiator": {
+    "value": "lightning.pytorch.cli.instantiate_module"
+  },
+  "seed_everything": {
+    "value": 42
+  },
+  "include_background": {
+    "value": false
+  },
+  "num_output_channels": {
+    "value": 3
+  }
+}

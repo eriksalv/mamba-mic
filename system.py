@@ -15,6 +15,7 @@ class System(pl.LightningModule):
         softmax=False,
         include_background=True,
         num_output_channels=None,
+        log_hd95=True
     ) -> None:
         super().__init__()
         self.net = net
@@ -22,6 +23,7 @@ class System(pl.LightningModule):
         self.lr = lr
         self.softmax = softmax
         self.include_background = include_background
+        self.log_hd95 = log_hd95
 
         assert (num_output_channels is None and softmax is False) or (
             num_output_channels is not None and softmax is True
@@ -89,7 +91,9 @@ class System(pl.LightningModule):
         y_hat_binarized = self.post_pred(y_hat)
 
         self.dice_metric(y_hat_binarized, y)
-        self.hd95_metric(y_hat_binarized, y)
+        
+        if self.log_hd95:
+            self.hd95_metric(y_hat_binarized, y)
 
         self.log("val_loss", loss, sync_dist=True)
 
@@ -97,13 +101,11 @@ class System(pl.LightningModule):
 
     def on_validation_epoch_end(self):
         per_channel_dice = self.dice_metric.aggregate().nanmean(dim=0)
-        per_channel_hd95 = self.hd95_metric.aggregate().nanmean(dim=0)
 
         self.dice_metric.reset()
-        self.hd95_metric.reset()
 
         self.log_dict(
-            {"val_dice": per_channel_dice.mean(), "val_hd95": per_channel_hd95.mean()},
+            {"val_dice": per_channel_dice.mean()},
             sync_dist=True,
         )
 
@@ -112,10 +114,28 @@ class System(pl.LightningModule):
             self.log_dict(
                 {
                     f"channel{i}/val_dice": per_channel_dice[i],
-                    f"channel{i}/val_hd95": per_channel_hd95[i],
                 },
                 sync_dist=True,
             )
+
+        if self.log_hd95:
+            per_channel_hd95 = self.hd95_metric.aggregate().nanmean(dim=0)
+
+            self.hd95_metric.reset()
+
+            self.log_dict(
+                {"val_hd95": per_channel_hd95.mean()},
+                sync_dist=True,
+            )
+
+            num_channels = len(per_channel_hd95)
+            for i in range(num_channels):
+                self.log_dict(
+                    {
+                        f"channel{i}/val_hd95": per_channel_hd95[i],
+                    },
+                    sync_dist=True,
+                )
 
     def configure_optimizers(self):
         optimizer = torch.optim.AdamW(self.parameters(), lr=self.lr)
