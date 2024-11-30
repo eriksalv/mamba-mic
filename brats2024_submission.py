@@ -14,15 +14,14 @@ import nibabel as nib
 def generate_submission(args):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    run = wandb.init(
-        project="brats2024",
-        name=args.name,
-        job_type="submission",
-    )
-
     if args.local:
         checkpoint_path = args.model_ckpt
     else:
+        run = wandb.init(
+            project="brats2024",
+            name=args.name,
+            job_type="submission",
+        )
         artifact = run.use_artifact(args.model_ckpt, type="model")
         artifact_dir = artifact.download()
         checkpoint_path = Path(artifact_dir) / "model.ckpt"
@@ -66,8 +65,6 @@ def generate_submission(args):
                 ),
                 f"./data/BRATS2024/{sub_path}.nii.gz",
             )
-
-    wandb.finish()
 
 
 if __name__ == "__main__":
