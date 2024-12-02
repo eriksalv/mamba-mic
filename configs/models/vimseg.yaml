@@ -1,0 +1,26 @@
+  class_path: models.vimseg.VimSegModel
+  init_args:
+     vimseg:
+      init_args:
+        img_size: 512
+        patch_size: 16
+        in_chans: 3
+        num_classes: 3
+        embed_dim: 384
+        depth: 24
+        use_checkpoint: False
+        out_indices: [5, 11, 17, 23]
+        if_fpn: True
+        use_residual_as_feature: False
+        last_layer_process: 'none'
+        pretrained: None
+        rms_norm: True
+        residual_in_fp32: True
+        fused_add_norm: True
+        if_abs_pos_embed: True
+        if_rope: True
+        if_rope_residual: True
+        bimamba_type: 'v2'
+        final_pool_type: 'all'
+        if_cls_token: True
+     

@@ -14,10 +14,14 @@ from monai.transforms import (
     MapTransform,
     Activations,
     AsDiscrete,
+    Resized
 )
 from torch.utils.data import DataLoader
 import torch
 
+def collate_fn(batch):
+   batch = list(filter(lambda x: x is not None, batch))
+   return torch.utils.data.dataloader.default_collate(batch)
 
 class DecathlonDataModule(pl.LightningDataModule):
     def __init__(
@@ -52,6 +56,7 @@ class DecathlonDataModule(pl.LightningDataModule):
                         pixdim=(1.0, 1.0, 1.0),
                         mode=("bilinear", "nearest"),
                     ),
+                    Resized(keys=["image", "label"], spatial_size=(128, 128, 128)),
                     ScaleIntensityd(keys="image", minv=0, maxv=1, channel_wise=True),
                 ]
             )
@@ -146,7 +151,7 @@ class DecathlonDataModule(pl.LightningDataModule):
         )
 
     def test_dataloader(self):
-        return DataLoader(self.test_set, batch_size=self.batch_size)
+        return DataLoader(self.test_set, batch_size=self.batch_size, collate_fn=collate_fn)
 
 
 class ConvertToMultiChannelBasedOnBratsClassesd(MapTransform):

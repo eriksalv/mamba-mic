@@ -157,9 +157,9 @@ class BraTS2024DataModule(pl.LightningDataModule):
             generator=torch.Generator().manual_seed(42)
         )
         # Sanity check
-        print(train_subjects[0]['t1c'])
-        print(val_subjects[0]['t1c'])
-        print(test_subjects[0]['t1c'])
+        print(train_subjects)
+        print(val_subjects)
+        print(test_subjects)
 
         # Assign train/val datasets for use in dataloaders
         if stage == "fit" or stage is None:
@@ -173,7 +173,7 @@ class BraTS2024DataModule(pl.LightningDataModule):
                 transform=T.Compose(
                     [
                         self.preprocess,
-                        T.NormalizeIntensityd(keys="image", channel_wise=True)
+                        T.NormalizeIntensityd(keys="image", channel_wise=True, nonzero=True)
                     ]
                 ), 
                 cache_rate=0.0
@@ -186,7 +186,7 @@ class BraTS2024DataModule(pl.LightningDataModule):
                 transform=T.Compose(
                     [
                         self.preprocess,
-                        T.NormalizeIntensityd(keys="image", channel_wise=True)
+                        T.NormalizeIntensityd(keys="image", channel_wise=True, nonzero=True)
                     ]
                 ),
                 cache_rate=0.0,
@@ -203,13 +203,13 @@ class BraTS2024DataModule(pl.LightningDataModule):
     def val_dataloader(self):
         return DataLoader(
             self.val_set,
-            batch_size=self.batch_size,
+            batch_size=1,
             num_workers=self.num_workers,
             shuffle=False,
         )
 
     def test_dataloader(self):
-        return DataLoader(self.test_set, batch_size=self.batch_size)
+        return DataLoader(self.test_set, batch_size=1)
 
 
 class ConvertToMultiChannelBasedOnBratsClassesd(T.MapTransform):

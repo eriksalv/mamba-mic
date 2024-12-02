@@ -6,3 +6,4 @@ checkpoints
 artifacts
 lightning_logs
 run_config.yaml
+build/
