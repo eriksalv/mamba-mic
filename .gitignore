@@ -7,3 +7,5 @@ artifacts
 lightning_logs
 run_config.yaml
 build/
+tmp_gt/
+tmp_pred/

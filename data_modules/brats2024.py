@@ -73,8 +73,8 @@ class BraTS2024DataModule(pl.LightningDataModule):
             if postprocess is not None
             else T.Compose(
                 [
-                    T.Activations(sigmoid=True),
-                    T.AsDiscrete(threshold=0.5),
+                    T.Activationsd(keys='pred', sigmoid=True),
+                    T.AsDiscreted(keys='pred', threshold=0.5),
                 ]
             )
         )
@@ -192,6 +192,23 @@ class BraTS2024DataModule(pl.LightningDataModule):
                 cache_rate=0.0,
             )
 
+            self.postprocess = T.Compose(
+                [
+                    self.postprocess,
+                    T.Invertd(
+                        keys="pred",
+                        transform=self.test_set.transform,
+                        orig_keys="label",
+                        meta_keys="pred_meta_dict",
+                        orig_meta_keys="image_meta_dict",
+                        meta_key_postfix="meta_dict",
+                        nearest_interp=False,
+                        to_tensor=True,
+                        device="cpu",
+                    ),
+                ]
+            )
+
     def train_dataloader(self):
         return DataLoader(
             self.train_set,
@@ -212,7 +229,7 @@ class BraTS2024DataModule(pl.LightningDataModule):
         return DataLoader(self.test_set, batch_size=1)
 
 
-class ConvertToMultiChannelBasedOnBratsClassesd(T.MapTransform):
+class ConvertToMultiChannelBasedOnBratsClassesd(T.MapTransform, T.InvertibleTransform):
     """
     Converts non-overlapping BraTS 2024 labels (NETC, SNFH, ET, RC)
     into partially overlapping multi-channels (ET, TC, WT, RC)
@@ -243,7 +260,7 @@ class ConvertToMultiChannelBasedOnBratsClassesd(T.MapTransform):
         for key in self.keys:
             if key in data:
                 non_overlapping = [
-                    (d[key][0] == 1)
+                    (d[key][0] == 0)
                     & (d[key][1] == 0)
                     & (d[key][2] == 0)
                     & (d[key][3] == 0),
