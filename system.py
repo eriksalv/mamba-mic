@@ -98,7 +98,7 @@ class System(pl.LightningModule):
         return loss
 
     def validation_step(self, batch, batch_idx):
-        loss = self._shared_eval_step(self, batch, batch_idx)
+        loss = self._shared_eval_step(batch, batch_idx)
         self.log("val_loss", loss, sync_dist=True)
         return {"val_loss": loss}
     
