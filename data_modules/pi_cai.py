@@ -40,7 +40,9 @@ class PICAIDataModule(pl.LightningDataModule):
                         pixdim=(0.5, 0.5, 1.2),
                         mode=("bilinear", "nearest"),
                     ),
-                    T.Resized(keys=["image", "label"], spatial_size=[360, 360, 40])
+                    T.NormalizeIntensityd(keys="image", channel_wise=True),
+                    T.Resized(keys=["image", "label"], spatial_size=[512, 512, 32]),
+                    ConvertToMultiChanneld(keys=["label"]),
             ]) 
 
         self.preprocess = (
@@ -53,14 +55,14 @@ class PICAIDataModule(pl.LightningDataModule):
             if augment is not None
             else T.Compose(
                 [
-                    T.RandFlipd(keys=["image", "label"], prob=0.5, spatial_axis=0),
-                    T.RandFlipd(keys=["image", "label"], prob=0.5, spatial_axis=1),
-                    T.RandFlipd(keys=["image", "label"], prob=0.5, spatial_axis=2),
                     T.NormalizeIntensityd(
                         keys="image", nonzero=True, channel_wise=True
                     ),
-                    T.RandScaleIntensityd(keys="image", factors=0.1, prob=1.0),
-                    T.RandShiftIntensityd(keys="image", offsets=0.1, prob=1.0),
+                    T.RandCropByLabelClassesd(keys=["image", "label"], label_key = "label", spatial_size = [256, 256, 32],
+                                              num_classes = 5, num_samples = 1, ratios = [1, 1, 1, 1, 1], allow_missing_keys=True),
+                    T.RandFlipd(keys=["image", "label"], prob=0.5, spatial_axis=0),
+                    T.RandFlipd(keys=["image", "label"], prob=0.5, spatial_axis=1),
+                    T.RandFlipd(keys=["image", "label"], prob=0.5, spatial_axis=2),
                 ]
             )
         )
@@ -157,4 +159,22 @@ class PICAIDataModule(pl.LightningDataModule):
     def test_dataloader(self):
         return DataLoader(self.test_set, batch_size=self.batch_size)
 
+class ConvertToMultiChanneld(T.MapTransform):
+    def __call__(self, data):
+        d = dict(data)
+        for key in self.keys:
+            if key in data:
+                label = d[key]  # Extract label tensor
+                
+                # Create a one-hot encoding with 3 channels (excluding background)
+                result = [
+                    (label == 1).float(),  # Class 1
+                    (label == 2).float(),  # Class 2
+                    (label == 3).float(),  # Class 3
+                    (label == 4).float(),  # Class 4
+                    (label == 5).float(),  # Class 5
+                ]
+                
+                d[key] = torch.stack(result, axis=0).squeeze()  # Stack along channel axis
+        return d
 
