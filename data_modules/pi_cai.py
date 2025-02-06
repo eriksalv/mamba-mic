@@ -5,7 +5,7 @@ from torch.utils.data import DataLoader, random_split
 from glob import glob
 import os
 import torch
-
+import numpy as np
 
 class PICAIDataModule(pl.LightningDataModule):
     def __init__(
@@ -41,7 +41,7 @@ class PICAIDataModule(pl.LightningDataModule):
                         mode=("bilinear", "nearest"),
                     ),
                     T.NormalizeIntensityd(keys="image", channel_wise=True),
-                    T.Resized(keys=["image", "label"], spatial_size=[512, 512, 32]),
+                    T.Resized(keys=["image", "label"], spatial_size=[512, 512, 32], mode=("area", "nearest")),
                     ConvertToMultiChanneld(keys=["label"]),
             ]) 
 
@@ -104,6 +104,11 @@ class PICAIDataModule(pl.LightningDataModule):
             [1 - self.val_frac - self.test_frac, self.val_frac, self.test_frac], 
             generator=torch.Generator().manual_seed(42)
         )
+        print(f"Train subjects before filtering: {len(train_subjects)}")
+        train_subjects = [s for s in train_subjects if np.any(T.LoadImage()(s["label"]) > 0)]
+
+        # Print dataset sizes after filtering
+        print(f"Train subjects after filtering: {len(train_subjects)}")
         # Sanity check
         print(train_subjects)
         print(val_subjects)
