@@ -42,7 +42,7 @@ class PICAIDataModule(pl.LightningDataModule):
                     ),
                     T.NormalizeIntensityd(keys="image", channel_wise=True),
                     T.Resized(keys=["image", "label"], spatial_size=[512, 512, 32], mode=("area", "nearest")),
-                    ConvertToMultiChanneld(keys=["label"]),
+                    ConvertToBinaryLabeld(keys=["label"]),
             ]) 
 
         self.preprocess = (
@@ -59,7 +59,7 @@ class PICAIDataModule(pl.LightningDataModule):
                         keys="image", nonzero=True, channel_wise=True
                     ),
                     T.RandCropByLabelClassesd(keys=["image", "label"], label_key = "label", spatial_size = [256, 256, 32],
-                                              num_classes = 5, num_samples = 1, ratios = [1, 1, 1, 1, 1], allow_missing_keys=True),
+                                              num_classes = 2, num_samples = 1, ratios = [0.01, 1], allow_missing_keys=True),
                     T.RandFlipd(keys=["image", "label"], prob=0.5, spatial_axis=0),
                     T.RandFlipd(keys=["image", "label"], prob=0.5, spatial_axis=1),
                     T.RandFlipd(keys=["image", "label"], prob=0.5, spatial_axis=2),
@@ -183,3 +183,14 @@ class ConvertToMultiChanneld(T.MapTransform):
                 d[key] = torch.stack(result, axis=0).squeeze()  # Stack along channel axis
         return d
 
+class ConvertToBinaryLabeld(T.MapTransform):
+    def __call__(self, data):
+        d = dict(data)
+        for key in self.keys:
+            if key in data:
+                label = d[key]  # Extract label tensor
+                
+                # Convert to binary: 0 for ISUP ≤1, 1 for ISUP ≥2
+                d[key] = (label >= 1).float()
+                
+        return d
