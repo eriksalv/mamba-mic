@@ -33,11 +33,10 @@ class PICAIDataModule(pl.LightningDataModule):
                 [
                     T.LoadImaged(keys=["image", "label"]),
                     T.EnsureChannelFirstd(keys=["image", "label"]),
-                    T.Lambdad(keys="image", func=lambda x: x[:1]),
                     T.Orientationd(keys=["image", "label"], axcodes="RAS"),
                     T.Spacingd(
                         keys=["image", "label"],
-                        pixdim=(0.5, 0.5, 1.2),
+                        pixdim=(0.5, 0.5, 3),
                         mode=("bilinear", "nearest"),
                     ),
                     T.NormalizeIntensityd(keys="image", channel_wise=True),
@@ -58,8 +57,8 @@ class PICAIDataModule(pl.LightningDataModule):
                     T.NormalizeIntensityd(
                         keys="image", nonzero=True, channel_wise=True
                     ),
-                    T.RandCropByLabelClassesd(keys=["image", "label"], label_key = "label", spatial_size = [256, 256, 32],
-                                              num_classes = 2, num_samples = 1, ratios = [0.01, 1], allow_missing_keys=True),
+                    T.RandCropByLabelClassesd(keys=["image", "label"], label_key="label", image_key="image", spatial_size = [256, 256, 32],
+                                              num_classes=2, ratios=[0.6, 1], allow_missing_keys=True),
                     T.RandFlipd(keys=["image", "label"], prob=0.5, spatial_axis=0),
                     T.RandFlipd(keys=["image", "label"], prob=0.5, spatial_axis=1),
                     T.RandFlipd(keys=["image", "label"], prob=0.5, spatial_axis=2),
@@ -104,15 +103,6 @@ class PICAIDataModule(pl.LightningDataModule):
             [1 - self.val_frac - self.test_frac, self.val_frac, self.test_frac], 
             generator=torch.Generator().manual_seed(42)
         )
-        print(f"Train subjects before filtering: {len(train_subjects)}")
-        train_subjects = [s for s in train_subjects if np.any(T.LoadImage()(s["label"]) > 0)]
-
-        # Print dataset sizes after filtering
-        print(f"Train subjects after filtering: {len(train_subjects)}")
-        # Sanity check
-        print(train_subjects)
-        print(val_subjects)
-        print(test_subjects)
         
         # Assign train/val datasets for use in dataloaders
         if stage == "fit" or stage is None:
