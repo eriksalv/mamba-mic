@@ -73,8 +73,8 @@ class BraTS2024DataModule(pl.LightningDataModule):
             if postprocess is not None
             else T.Compose(
                 [
-                    T.Activations(sigmoid=True),
-                    T.AsDiscrete(threshold=0.5),
+                    T.Activationsd(keys='pred', sigmoid=True),
+                    T.AsDiscreted(keys='pred', threshold=0.5),
                 ]
             )
         )
@@ -157,9 +157,9 @@ class BraTS2024DataModule(pl.LightningDataModule):
             generator=torch.Generator().manual_seed(42)
         )
         # Sanity check
-        print(train_subjects[0]['t1c'])
-        print(val_subjects[0]['t1c'])
-        print(test_subjects[0]['t1c'])
+        print(train_subjects)
+        print(val_subjects)
+        print(test_subjects)
 
         # Assign train/val datasets for use in dataloaders
         if stage == "fit" or stage is None:
@@ -173,7 +173,7 @@ class BraTS2024DataModule(pl.LightningDataModule):
                 transform=T.Compose(
                     [
                         self.preprocess,
-                        T.NormalizeIntensityd(keys="image", channel_wise=True)
+                        T.NormalizeIntensityd(keys="image", channel_wise=True, nonzero=True)
                     ]
                 ), 
                 cache_rate=0.0
@@ -186,10 +186,27 @@ class BraTS2024DataModule(pl.LightningDataModule):
                 transform=T.Compose(
                     [
                         self.preprocess,
-                        T.NormalizeIntensityd(keys="image", channel_wise=True)
+                        T.NormalizeIntensityd(keys="image", channel_wise=True, nonzero=True)
                     ]
                 ),
                 cache_rate=0.0,
+            )
+
+            self.postprocess = T.Compose(
+                [
+                    self.postprocess,
+                    T.Invertd(
+                        keys="pred",
+                        transform=self.test_set.transform,
+                        orig_keys="label",
+                        meta_keys="pred_meta_dict",
+                        orig_meta_keys="image_meta_dict",
+                        meta_key_postfix="meta_dict",
+                        nearest_interp=False,
+                        to_tensor=True,
+                        device="cpu",
+                    ),
+                ]
             )
 
     def train_dataloader(self):
@@ -203,16 +220,16 @@ class BraTS2024DataModule(pl.LightningDataModule):
     def val_dataloader(self):
         return DataLoader(
             self.val_set,
-            batch_size=self.batch_size,
+            batch_size=1,
             num_workers=self.num_workers,
             shuffle=False,
         )
 
     def test_dataloader(self):
-        return DataLoader(self.test_set, batch_size=self.batch_size)
+        return DataLoader(self.test_set, batch_size=1)
 
 
-class ConvertToMultiChannelBasedOnBratsClassesd(T.MapTransform):
+class ConvertToMultiChannelBasedOnBratsClassesd(T.MapTransform, T.InvertibleTransform):
     """
     Converts non-overlapping BraTS 2024 labels (NETC, SNFH, ET, RC)
     into partially overlapping multi-channels (ET, TC, WT, RC)
@@ -243,7 +260,7 @@ class ConvertToMultiChannelBasedOnBratsClassesd(T.MapTransform):
         for key in self.keys:
             if key in data:
                 non_overlapping = [
-                    (d[key][0] == 1)
+                    (d[key][0] == 0)
                     & (d[key][1] == 0)
                     & (d[key][2] == 0)
                     & (d[key][3] == 0),

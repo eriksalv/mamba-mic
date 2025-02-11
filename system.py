@@ -83,8 +83,8 @@ class System(pl.LightningModule):
         self.log("train_loss", loss, prog_bar=True)
 
         return loss
-
-    def validation_step(self, batch, batch_idx):
+    
+    def _shared_eval_step(self, batch, batch_idx):
         y_hat, y = self.infer_batch(batch, val=True)
         loss = self.criterion(y_hat, y)
 
@@ -94,48 +94,46 @@ class System(pl.LightningModule):
         
         if self.log_hd95:
             self.hd95_metric(y_hat_binarized, y)
+        
+        return loss
 
+    def validation_step(self, batch, batch_idx):
+        loss = self._shared_eval_step(batch, batch_idx)
         self.log("val_loss", loss, sync_dist=True)
-
         return {"val_loss": loss}
+    
+    def test_step(self, batch, batch_idx):
+        loss = self._shared_eval_step(batch, batch_idx)
+        self.log("test_loss", loss, sync_dist=True)
+        return {"test_loss": loss}
 
-    def on_validation_epoch_end(self):
+    def _shared_on_epoch_end(self, stage="val"):
         per_channel_dice = self.dice_metric.aggregate().nanmean(dim=0)
-
         self.dice_metric.reset()
 
-        self.log_dict(
-            {"val_dice": per_channel_dice.mean()},
-            sync_dist=True,
-        )
+        metrics = {f"{stage}_dice": per_channel_dice.mean()}
 
         num_channels = len(per_channel_dice)
         for i in range(num_channels):
-            self.log_dict(
-                {
-                    f"channel{i}/val_dice": per_channel_dice[i],
-                },
-                sync_dist=True,
-            )
-
+            metrics[f"channel{i}/{stage}_dice"] = per_channel_dice[i]
+        
         if self.log_hd95:
             per_channel_hd95 = self.hd95_metric.aggregate().nanmean(dim=0)
-
             self.hd95_metric.reset()
 
-            self.log_dict(
-                {"val_hd95": per_channel_hd95.mean()},
-                sync_dist=True,
-            )
+            metrics[f"{stage}_hd95"] = per_channel_hd95.mean()
 
             num_channels = len(per_channel_hd95)
             for i in range(num_channels):
-                self.log_dict(
-                    {
-                        f"channel{i}/val_hd95": per_channel_hd95[i],
-                    },
-                    sync_dist=True,
-                )
+                metrics[f"channel{i}/{stage}_hd95"] = per_channel_hd95[i]
+        
+        self.log_dict(metrics, sync_dist=True)
+
+    def on_validation_epoch_end(self):
+        self._shared_on_epoch_end(stage="val")
+
+    def on_test_epoch_end(self):
+        self._shared_on_epoch_end(stage="test")
 
     def configure_optimizers(self):
         optimizer = torch.optim.AdamW(self.parameters(), lr=self.lr)

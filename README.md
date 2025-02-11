@@ -44,7 +44,7 @@ Running the "fit" command will use the "configs/default.yaml" file by default. Y
 
 Or change specific arguments from cli, like the name of the run with
 
-`python main.py fit --wandb.name 'my-run'`
+`python main.py fit --wandb.name my-run`
 
 #### Some parameters that might be useful to change
 
@@ -56,8 +56,20 @@ Or change specific arguments from cli, like the name of the run with
 
 `python train_example.py`
 
-## Run inference
+## Inference
 
-`python inference.py --model-ckpt=<model-ckpt> --local={true,false}`
+#### Run standard evaluation loop on the test set
 
-If local is true, then it will look for model ckpt in a local folder, else it will download ckpt from wandb artifact
+`python main.py test --ckpt_path path/to/ckpt_file.ckpt`
+
+This will measure loss, dice score and HD95 using standard MONAI metrics.
+
+#### Save predictions on the test set and evaluate using BraTS 2024 metrics
+
+Submissions to BraTS 2024 are evaluated with custom "lesion-wise" dice and HD95 metrics. To save predictions on all test cases as nifti files and evaluate performance using these custom metrics run:
+
+`python brats2024_submission.py --name ... --model_ckpt ...`
+
+*Note:* this will require a few additional dependencies that can be installed with:
+
+`pip install -r brats_2024_metrics/requirements.txt`
