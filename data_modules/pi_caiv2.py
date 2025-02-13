@@ -48,7 +48,7 @@ class PICAIV2DataModule(pl.LightningDataModule):
                     
                     T.Spacingd(
                         keys=["t2w", "adc", "hbv", "label"],
-                        pixdim=(0.5, 0.5, 1.2),
+                        pixdim=(0.5, 0.5, 3.0),
                         mode=("bilinear", "bilinear", "bilinear", "nearest"),
                     ),
                     
@@ -70,7 +70,7 @@ class PICAIV2DataModule(pl.LightningDataModule):
                 [
 
                     T.RandCropByLabelClassesd(keys=["t2w", "adc", "hbv", "label"], label_key = "label", spatial_size = [256, 256, 32],
-                                              num_classes = 2, num_samples = 1, ratios = [0.1, 1]),
+                                              num_classes = 2, num_samples = 1, ratios = [0.5, 0.5]),
                     StackImages(keys=["t2w", "adc", "hbv"]),
                     T.RandFlipd(keys=["image", "label"], prob=0.5, spatial_axis=0),
                     T.RandFlipd(keys=["image", "label"], prob=0.5, spatial_axis=1),
@@ -99,26 +99,38 @@ class PICAIV2DataModule(pl.LightningDataModule):
 
         data = []
         for patient_id in patient_ids:
-
             patient_folder = os.path.join(self.image_dir, patient_id)
-            label_path = glob(os.path.join(self.label_dir, f"{patient_id}_*.nii.gz"))
-            t2w_path = glob(os.path.join(patient_folder, "*_t2w.mha"))
-            adc_path = glob(os.path.join(patient_folder, "*_adc.mha"))
-            hbv_path = glob(os.path.join(patient_folder, "*_hbv.mha"))
-
-            data_entry = {}
-
-
-            if t2w_path and adc_path and hbv_path and label_path:  
-                data_entry = {
-                    "t2w" : t2w_path,
-                    "adc" : adc_path,
-                    "hbv" : hbv_path,
-                    "label" : label_path
-
-                }
-
-                data.append(data_entry)
+            
+            # Find all file paths
+            label_paths = glob(os.path.join(self.label_dir, f"{patient_id}_*.nii.gz"))
+            t2w_paths = glob(os.path.join(patient_folder, "*_t2w.mha"))
+            adc_paths = glob(os.path.join(patient_folder, "*_adc.mha"))
+            hbv_paths = glob(os.path.join(patient_folder, "*_hbv.mha"))
+            
+            # Identify the case IDs by extracting the common identifier part from the filenames
+            case_ids = set()
+            for path in t2w_paths + adc_paths + hbv_paths:
+                # Extract the case ID (e.g., '10131_1000132' from '10131_1000132_t2w.mha')
+                case_id = '_'.join(os.path.basename(path).split('_')[:2])
+                case_ids.add(case_id)
+            
+            # Process each case separately
+            for case_id in case_ids:
+                # Filter files by case_id
+                case_t2w = [path for path in t2w_paths if case_id in path]
+                case_adc = [path for path in adc_paths if case_id in path]
+                case_hbv = [path for path in hbv_paths if case_id in path]
+                case_label = [path for path in label_paths if case_id in path]
+                
+                # Ensure all files are found for this case before adding it to the data
+                if case_t2w and case_adc and case_hbv and case_label:
+                    data_entry = {
+                        "t2w": case_t2w,
+                        "adc": case_adc,
+                        "hbv": case_hbv,
+                        "label": case_label
+                    }
+                    data.append(data_entry)
 
 
         # Store subject dictionaries
