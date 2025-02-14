@@ -1,0 +1,25 @@
+class_path: system.System
+init_args:
+  include_background: true
+  log_hd95: true
+  net:
+    class_path: models.umamba.UMambaEnc
+    init_args: 
+      input_size: [256, 256, 32]
+      input_channels: 3
+      n_stages: 5
+      features_per_stage: [32, 64, 128, 256, 320]
+      conv_op: torch.nn.Conv3d
+      kernel_sizes: [3, 3, 3, 3, 3]
+      strides: [1, 2, 2, 2, 2]
+      n_conv_per_stage: [2, 2, 2, 2, 2]
+      num_classes: 2
+      n_conv_per_stage_decoder: [2, 2, 2, 2, 2]
+  val_inferer:
+    class_path: monai.inferers.SlidingWindowInferer
+    init_args:
+      roi_size: [256, 256, 32]
+      sw_batch_size: 4
+      overlap: 0.5
+      mode: gaussian
+     
