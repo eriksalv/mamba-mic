@@ -2,7 +2,7 @@ import torch
 import lightning.pytorch as pl
 from monai.metrics import DiceMetric, HausdorffDistanceMetric
 from monai.losses.dice import DiceCELoss
-from monai.inferers import Inferer
+from monai.inferers import Inferer, SliceInferer
 from monai.transforms import Compose, Activations, AsDiscrete
 
 
@@ -10,16 +10,19 @@ class System(pl.LightningModule):
     def __init__(
         self,
         net: torch.nn.Module,
-        val_inferer: Inferer,
+        val_inferer: Inferer = None,
         lr=0.001,
         softmax=False,
         include_background=True,
         num_output_channels=None,
-        log_hd95=True
+        log_hd95=True,
+        do_slice_inference=False,
+        slice_shape=None,
+        slice_dim=None,
+        slice_batch_size=None,
     ) -> None:
         super().__init__()
         self.net = net
-        self.val_inferer = val_inferer
         self.lr = lr
         self.softmax = softmax
         self.include_background = include_background
@@ -58,6 +61,23 @@ class System(pl.LightningModule):
             )
         )
 
+        if do_slice_inference:
+            assert (
+                slice_dim is not None
+                and slice_shape is not None
+                and slice_batch_size is not None
+            ), "slice_dim, slice_shape and slice_batch_size must be specified if do_slice_inference is True"
+            self.slice_inferer = SliceInferer(
+                roi_size=slice_shape,
+                sw_batch_size=slice_batch_size,
+                spatial_dim=slice_dim,
+            )
+        else:
+            assert (
+                val_inferer is not None
+            ), "val_inferer must be specified if do_slice_inference is False"
+            self.val_inferer = val_inferer
+
         self.save_hyperparameters()
 
     def forward(self, x):
@@ -69,12 +89,13 @@ class System(pl.LightningModule):
 
         x, y = batch["image"], batch["label"]
 
+        if self.do_slice_inference:
+            return self.slice_inferer(inputs=x, network=self.net), y
+
         if val is False:
-            y_hat = self(x)
-        else:
-            y_hat = self.val_inferer(inputs=x, network=self.net)
-            
-        return y_hat, y
+            return self(x), y
+
+        return self.val_inferer(inputs=x, network=self.net), y
 
     def training_step(self, batch, batch_idx):
         y_hat, y = self.infer_batch(batch)
@@ -83,7 +104,7 @@ class System(pl.LightningModule):
         self.log("train_loss", loss, prog_bar=True)
 
         return loss
-    
+
     def _shared_eval_step(self, batch, batch_idx):
         y_hat, y = self.infer_batch(batch, val=True)
         loss = self.criterion(y_hat, y)
@@ -91,17 +112,17 @@ class System(pl.LightningModule):
         y_hat_binarized = self.post_pred(y_hat)
 
         self.dice_metric(y_hat_binarized, y)
-        
+
         if self.log_hd95:
             self.hd95_metric(y_hat_binarized, y)
-        
+
         return loss
 
     def validation_step(self, batch, batch_idx):
         loss = self._shared_eval_step(batch, batch_idx)
         self.log("val_loss", loss, sync_dist=True)
         return {"val_loss": loss}
-    
+
     def test_step(self, batch, batch_idx):
         loss = self._shared_eval_step(batch, batch_idx)
         self.log("test_loss", loss, sync_dist=True)
@@ -116,7 +137,7 @@ class System(pl.LightningModule):
         num_channels = len(per_channel_dice)
         for i in range(num_channels):
             metrics[f"channel{i}/{stage}_dice"] = per_channel_dice[i]
-        
+
         if self.log_hd95:
             per_channel_hd95 = self.hd95_metric.aggregate().nanmean(dim=0)
             self.hd95_metric.reset()
@@ -126,7 +147,7 @@ class System(pl.LightningModule):
             num_channels = len(per_channel_hd95)
             for i in range(num_channels):
                 metrics[f"channel{i}/{stage}_hd95"] = per_channel_hd95[i]
-        
+
         self.log_dict(metrics, sync_dist=True)
 
     def on_validation_epoch_end(self):
