@@ -473,19 +473,12 @@ class UMambaEnc(nn.Module):
         input_channels: int,
         n_stages: int,
         features_per_stage: Union[int, List[int], Tuple[int, ...]],
-        conv_op: Type[_ConvNd],
         kernel_sizes: Union[int, List[int], Tuple[int, ...]],
         strides: Union[int, List[int], Tuple[int, ...]],
         n_conv_per_stage: Union[int, List[int], Tuple[int, ...]],
         num_classes: int,
         n_conv_per_stage_decoder: Union[int, Tuple[int, ...], List[int]],
         conv_bias: bool = False,
-        norm_op: Union[None, Type[nn.Module]] = None,
-        norm_op_kwargs: dict = None,
-        dropout_op: Union[None, Type[_DropoutNd]] = None,
-        dropout_op_kwargs: dict = None,
-        nonlin: Union[None, Type[torch.nn.Module]] = None,
-        nonlin_kwargs: dict = None,
         deep_supervision: bool = False,
         stem_channels: int = None,
     ):
@@ -513,6 +506,15 @@ class UMambaEnc(nn.Module):
             f"stages, so it should have {n_stages - 1} entries. "
             f"n_conv_per_stage_decoder: {n_conv_per_stage_decoder}"
         )
+
+        # Put nnunet defaults here for now
+        # TODO: maybe make this configurable in the future
+        conv_op = convert_dim_to_conv_op(len(input_size))
+        norm_op = get_matching_instancenorm(conv_op)
+        norm_op_kwargs = {"eps": 1e-5, "affine": True}
+        nonlin = nn.LeakyReLU
+        nonlin_kwargs = {"inplace": True}
+
         self.encoder = ResidualMambaEncoder(
             input_size,
             input_channels,
