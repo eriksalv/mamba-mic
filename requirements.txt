@@ -15,3 +15,4 @@ numpy==1.26.4
 tensorboard==2.18.0
 scipy==1.14.1
 einops==0.8.0
+dynamic-network-architectures==0.3.1

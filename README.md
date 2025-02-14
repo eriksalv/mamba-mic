@@ -16,6 +16,38 @@ pip install -r requirements.txt
 
 `wandb login`
 
+## Specific setups
+
+#### UMamba
+
+1. Install main deps:
+
+```shell
+module purge
+module load Anaconda3/2024.02-1
+module load CUDA/11.8.0
+module load GCCcore/11.3.0
+conda create -n umamba python=3.11 -y
+conda activate umamba
+pip install -r requirements.txt
+pip install torch==2.0.1 torchvision==0.15.2 --index-url https://download.pytorch.org/whl/cu118
+```
+
+2. Verify that nvcc and pytorch have the same cuda version:
+
+```shell
+nvcc --version
+python -c "import torch; print(torch.__version__, torch.version.cuda)"
+``` 
+
+2. Install `causal-conv1d` and `mamba`:
+
+  - Clone the `causal-conv1d` and `mamba` repos
+  - `pip install -e causal-conv1d`
+  - `pip install --no-build-isolation -e mamba`
+
+3. Run job with `sbatch umamba-job.slurm "python main.py ..."`
+
 ## Running on IDUN
 
 On a login node, after following the prerequisites and setting up environment, simply run
