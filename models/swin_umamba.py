@@ -1,5 +1,3 @@
-import re
-import time
 import math
 import numpy as np
 from functools import partial
@@ -17,10 +15,6 @@ from mamba_2d.mamba_ssm.ops.selective_scan_interface import (
 )
 
 DropPath.__repr__ = lambda self: f"timm.DropPath({self.drop_prob})"
-
-from dynamic_network_architectures.initialization.weight_init import (
-    init_last_bn_before_add_to_0,
-)
 
 
 class PatchEmbed2D(nn.Module):

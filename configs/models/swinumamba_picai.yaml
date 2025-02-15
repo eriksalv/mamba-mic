@@ -1,0 +1,24 @@
+class_path: system.System
+init_args:
+  include_background: true
+  log_hd95: true
+  do_slice_inference: true
+  slice_shape: [256, 256]
+  slice_dim: 2
+  slice_batch_size: 32
+  net:
+    class_path: models.swin_umamba.SwinUMambaD
+    init_args: 
+      vss_args:
+        in_chans: 3
+        patch_size: 4
+        depths: [2, 2, 9, 2]
+        dims: 96
+        drop_path_rate: 0.2
+      decoder_args:
+        num_classes: 1
+        deep_supervision: false
+        features_per_stage: [96, 192, 384, 768]
+        drop_path_rate: 0.2
+        d_state: 16s
+     
