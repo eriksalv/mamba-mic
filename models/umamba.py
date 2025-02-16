@@ -469,18 +469,18 @@ class UNetResDecoder(nn.Module):
 class UMambaEnc(nn.Module):
     def __init__(
         self,
-        input_size: Tuple[int, ...],
+        input_size,
         input_channels: int,
         n_stages: int,
-        features_per_stage: Union[int, List[int], Tuple[int, ...]],
-        kernel_sizes: Union[int, List[int], Tuple[int, ...]],
-        strides: Union[int, List[int], Tuple[int, ...]],
-        n_conv_per_stage: Union[int, List[int], Tuple[int, ...]],
+        features_per_stage: list,
+        kernel_sizes,
+        strides,
+        n_conv_per_stage,
         num_classes: int,
-        n_conv_per_stage_decoder: Union[int, Tuple[int, ...], List[int]],
-        conv_bias: bool = False,
-        deep_supervision: bool = False,
-        stem_channels: int = None,
+        n_conv_per_stage_decoder,
+        conv_bias = False,
+        deep_supervision = False,
+        stem_channels = None,
     ):
         super().__init__()
         n_blocks_per_stage = n_conv_per_stage

@@ -61,6 +61,7 @@ class System(pl.LightningModule):
             )
         )
 
+        self.do_slice_inference = do_slice_inference
         if do_slice_inference:
             assert (
                 slice_dim is not None
