@@ -7,6 +7,7 @@ import os
 import torch
 import numpy as np
 from monai.data import ITKReader
+import SimpleITK as sitk
 
 class PICAIV2DataModule(pl.LightningDataModule):
     def __init__(
@@ -14,6 +15,8 @@ class PICAIV2DataModule(pl.LightningDataModule):
         batch_size: int,
         image_dir = "/cluster/projects/vc/data/mic/open/Prostate/PI-CAI-V2.0/images",
         label_dir = "/cluster/projects/vc/data/mic/open/Prostate/PI-CAI-V2.0/picai_labels/csPCa_lesion_delineations/human_expert/resampled",
+        ai_label_dir = "/cluster/projects/vc/data/mic/open/Prostate/PI-CAI-V2.0/picai_labels/csPCa_lesion_delineations/AI/Bosma22a",
+        include_ai_labels = True,
         val_frac=0.1,
         test_frac=0.1,
         use_test_for_val=False,
@@ -25,6 +28,8 @@ class PICAIV2DataModule(pl.LightningDataModule):
         super().__init__()
         self.image_dir = image_dir
         self.label_dir = label_dir
+        self.ai_label_dir = ai_label_dir
+        self.include_ai_labels = include_ai_labels
         self.batch_size = batch_size
         self.val_frac = val_frac
         self.test_frac = test_frac
@@ -34,7 +39,7 @@ class PICAIV2DataModule(pl.LightningDataModule):
 
         default_preprocess = T.Compose(
                 [
-                    T.LoadImaged(keys=["t2w", "adc", "hbv", "label"], reader = ITKReader),
+                    T.LoadImaged(keys=["t2w", "adc", "hbv", "label"]),
                     T.EnsureChannelFirstd(keys=["t2w", "adc", "hbv", "label"]),
             
                     T.ResampleToMatchd(
@@ -68,13 +73,50 @@ class PICAIV2DataModule(pl.LightningDataModule):
             if augment is not None
             else T.Compose(
                 [
+                    # Cropping by label
+                    T.RandCropByLabelClassesd(
+                        keys=["t2w", "adc", "hbv", "label"], 
+                        label_key="label", 
+                        spatial_size=[256, 256, 32],
+                        num_classes=2, 
+                        num_samples=1, 
+                        ratios=[0.1, 1]
+                    ),
+                    
+                    
 
-                    T.RandCropByLabelClassesd(keys=["t2w", "adc", "hbv", "label"], label_key = "label", spatial_size = [256, 256, 32],
-                                              num_classes = 2, num_samples = 1, ratios = [0.5, 0.5]),
+                    # Random flipping along different axes
+                    T.RandFlipd(keys=["t2w", "adc", "hbv", "label"], prob=0.5, spatial_axis=0),
+                    T.RandFlipd(keys=["t2w", "adc", "hbv", "label"], prob=0.5, spatial_axis=1),
+                    T.RandFlipd(keys=["t2w", "adc", "hbv", "label"], prob=0.5, spatial_axis=2),
+
+                    # Gaussian Noise
+                    T.RandGaussianNoised(keys=["t2w", "adc", "hbv"], prob=0.2, mean=0.0, std=0.1),
+
+                    # Gaussian Blur
+                    T.RandGaussianSmoothd(keys=["t2w", "adc", "hbv"], prob=0.2, sigma_x=(0.25, 1.5), sigma_y=(0.25, 1.5), sigma_z=(0.25, 1.5)),
+
+                    # Brightness and Contrast
+                    T.RandAdjustContrastd(keys=["t2w", "adc", "hbv"], prob=0.2, gamma=(0.5, 2)),
+                    T.RandScaleIntensityd(keys=["t2w", "adc", "hbv"], factors=0.5, prob=0.2),  # Brightness
+
+                    # Simulate Low Resolution
+                    T.RandZoomd(keys=["t2w", "adc", "hbv"], min_zoom=1.2, max_zoom=1.6, prob=0.2, keep_size=True),  
+
+                    # Elastic Deformation
+                    T.Rand3DElasticd(
+                        keys=["t2w", "adc", "hbv", "label"], 
+                        prob=0.2, 
+                        sigma_range=(5, 7), 
+                        magnitude_range=(50, 150)
+                    ),
+
+                    # Rotation
+                    T.RandRotated(keys=["t2w", "adc", "hbv", "label"], range_x=0.1, range_y=0.1, range_z=0.1, prob=0.2, keep_size=True),
+                    
+                    # Stack multi-modal images together
                     StackImages(keys=["t2w", "adc", "hbv"]),
-                    T.RandFlipd(keys=["image", "label"], prob=0.5, spatial_axis=0),
-                    T.RandFlipd(keys=["image", "label"], prob=0.5, spatial_axis=1),
-                    T.RandFlipd(keys=["image", "label"], prob=0.5, spatial_axis=2),
+                    
                 ]
             )
         )
@@ -98,6 +140,7 @@ class PICAIV2DataModule(pl.LightningDataModule):
 
 
         data = []
+   
         for patient_id in patient_ids:
             patient_folder = os.path.join(self.image_dir, patient_id)
             
@@ -122,17 +165,19 @@ class PICAIV2DataModule(pl.LightningDataModule):
                 case_hbv = [path for path in hbv_paths if case_id in path]
                 case_label = [path for path in label_paths if case_id in path]
                 
-                # Ensure all files are found for this case before adding it to the data
+                if not case_label and self.include_ai_labels:
+                    case_label = glob(f"{self.ai_label_dir}/{case_id}.nii.gz")
+                # Ensure all required files exist before adding to data
                 if case_t2w and case_adc and case_hbv and case_label:
-                    data_entry = {
+                    data.append({
                         "t2w": case_t2w,
                         "adc": case_adc,
                         "hbv": case_hbv,
                         "label": case_label
-                    }
-                    data.append(data_entry)
+                    })
+                    
 
-
+        print(f"Number of images: {len(data)}")
         # Store subject dictionaries
         self.subjects_with_ground_truth = data
 
@@ -142,10 +187,14 @@ class PICAIV2DataModule(pl.LightningDataModule):
             [1 - self.val_frac - self.test_frac, self.val_frac, self.test_frac], 
             generator=torch.Generator().manual_seed(42)
         )
+         # Filter out zero-filled labels from validation and test sets
+        val_subjects = self.filter_empty_labels(val_subjects)
+        test_subjects = self.filter_empty_labels(test_subjects)
+
         # Sanity check
-        print(train_subjects)
-        print(val_subjects)
-        print(test_subjects)
+        print("Training subjects:", len(train_subjects))
+        print("Validation subjects:", len(val_subjects))
+        print("Test subjects:", len(test_subjects))
         
         # Assign train/val datasets for use in dataloaders
         if stage == "fit" or stage is None:
@@ -196,6 +245,22 @@ class PICAIV2DataModule(pl.LightningDataModule):
 
     def test_dataloader(self):
         return DataLoader(self.test_set, batch_size=self.batch_size)
+    
+    def filter_empty_labels(self, subjects):
+        """Filter out subjects with labels filled with zeros using SimpleITK."""
+        filtered_subjects = []
+        for subject in subjects:
+            label_path = subject['label'][0]  
+            label_image = sitk.ReadImage(label_path)
+
+            # Convert SimpleITK image to a NumPy array
+            label_data = sitk.GetArrayFromImage(label_image)
+
+            # Only keep the subject if the label is not all zeros
+            if not np.all(label_data == 0):
+                filtered_subjects.append(subject)
+        
+        return filtered_subjects
 
 class ConvertToMultiChanneld(T.MapTransform):
     def __call__(self, data):
