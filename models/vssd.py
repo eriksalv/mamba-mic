@@ -18,9 +18,6 @@ except:
     from .mamba_util import PatchMerging, SimplePatchMerging, Stem, SimpleStem, Mlp
 from fvcore.nn import FlopCountAnalysis, flop_count_str, flop_count, parameter_count
 
-from mmengine.model import BaseModule
-from mmseg.registry import MODELS as MODELS_MMSEG
-
 
 class tTensor(torch.Tensor):
     @property
@@ -797,10 +794,3 @@ class Backbone_VMAMBA2(VMAMBA2):
 
 
 Backbone_VSSD: nn.Module = Backbone_VMAMBA2
-
-
-@MODELS_MMSEG.register_module()
-class MM_VSSD(BaseModule, Backbone_VSSD):
-    def __init__(self, *args, **kwargs):
-        BaseModule.__init__(self)
-        Backbone_VSSD.__init__(self, *args, **kwargs)
