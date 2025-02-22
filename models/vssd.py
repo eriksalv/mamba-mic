@@ -18,6 +18,8 @@ except:
     from .mamba_util import PatchMerging, SimplePatchMerging, Stem, SimpleStem, Mlp
 from fvcore.nn import FlopCountAnalysis, flop_count_str, flop_count, parameter_count
 
+from typing import Type
+
 
 class tTensor(torch.Tensor):
     @property
@@ -407,8 +409,8 @@ class VMAMBA2Block(nn.Module):
         qkv_bias=True,
         drop=0.0,
         drop_path=0.0,
-        act_layer=nn.GELU,
-        norm_layer=nn.LayerNorm,
+        act_layer: Type[nn.Module] = nn.GELU,
+        norm_layer: Type[nn.Module] = nn.LayerNorm,
         ssd_expansion=2,
         ssd_ngroups=1,
         ssd_chunk_size=256,
@@ -502,7 +504,7 @@ class BasicLayer(nn.Module):
         qkv_bias=True,
         drop=0.0,
         drop_path=0.0,
-        norm_layer=nn.LayerNorm,
+        norm_layer: Type[nn.Module] = nn.LayerNorm,
         downsample=None,
         use_checkpoint=False,
         ssd_expansion=2,
@@ -578,7 +580,7 @@ class VMAMBA2(nn.Module):
         qkv_bias=True,
         drop_rate=0.0,
         drop_path_rate=0.2,
-        norm_layer=nn.LayerNorm,
+        norm_layer: Type[nn.Module] = nn.LayerNorm,
         use_checkpoint=False,
         ssd_expansion=2,
         ssd_ngroups=1,

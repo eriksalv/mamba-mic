@@ -1,7 +1,11 @@
 import torch
 import lightning.pytorch as pl
-from monai.metrics import DiceMetric, HausdorffDistanceMetric
-from monai.losses.dice import DiceCELoss
+from monai.metrics import (
+    DiceMetric,
+    HausdorffDistanceMetric,
+    ConfusionMatrixMetric,
+)
+from monai.losses.dice import DiceFocalLoss
 from monai.inferers import Inferer, SliceInferer
 from monai.transforms import Compose, Activations, AsDiscrete
 
@@ -32,11 +36,12 @@ class System(pl.LightningModule):
             num_output_channels is not None and softmax is True
         ), "num_output_channels should only be set if softmax is True"
 
-        self.criterion = DiceCELoss(
+        self.criterion = DiceFocalLoss(
             include_background=include_background,
             sigmoid=not softmax,
             softmax=softmax,
             squared_pred=True,
+            gamma=0.5,
         )
         self.dice_metric = DiceMetric(
             include_background=include_background, reduction="none"
@@ -46,6 +51,9 @@ class System(pl.LightningModule):
             distance_metric="euclidean",
             percentile=95,
             reduction="none",
+        )
+        self.precision_metric = ConfusionMatrixMetric(
+            metric_name="precision", reduction="mean"
         )
 
         self.post_pred = (
@@ -67,16 +75,18 @@ class System(pl.LightningModule):
                 slice_dim is not None
                 and slice_shape is not None
                 and slice_batch_size is not None
-            ), "slice_dim, slice_shape and slice_batch_size must be specified if do_slice_inference is True"
+            ), (
+                "slice_dim, slice_shape and slice_batch_size must be specified if do_slice_inference is True"
+            )
             self.slice_inferer = SliceInferer(
                 roi_size=slice_shape,
                 sw_batch_size=slice_batch_size,
                 spatial_dim=slice_dim,
             )
         else:
-            assert (
-                val_inferer is not None
-            ), "val_inferer must be specified if do_slice_inference is False"
+            assert val_inferer is not None, (
+                "val_inferer must be specified if do_slice_inference is False"
+            )
             self.val_inferer = val_inferer
 
         self.save_hyperparameters()
@@ -117,6 +127,8 @@ class System(pl.LightningModule):
         if self.log_hd95:
             self.hd95_metric(y_hat_binarized, y)
 
+        self.precision_metric(y_hat_binarized, y)
+
         return loss
 
     def validation_step(self, batch, batch_idx):
@@ -133,7 +145,11 @@ class System(pl.LightningModule):
         per_channel_dice = self.dice_metric.aggregate().nanmean(dim=0)
         self.dice_metric.reset()
 
-        metrics = {f"{stage}_dice": per_channel_dice.mean()}
+        metrics = {
+            f"{stage}_dice": per_channel_dice.mean(),
+            f"{stage}_precision": self.precision_metric.aggregate()[0].item(),
+        }
+        self.precision_metric.reset()
 
         num_channels = len(per_channel_dice)
         for i in range(num_channels):
