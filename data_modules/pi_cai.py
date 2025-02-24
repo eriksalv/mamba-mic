@@ -21,7 +21,7 @@ class PICAIDataModule(pl.LightningDataModule):
         preprocess=None,
         augment=None,
         filter_empty_labels=False,
-        lowest_positive_isup_grade=2
+        lowest_positive_isup_grade=2,
     ):
         super().__init__()
         self.data_dir = data_dir
@@ -59,11 +59,35 @@ class PICAIDataModule(pl.LightningDataModule):
                     keys="image", lower=None, upper=99, channel_wise=True
                 ),
                 T.NormalizeIntensityd(keys="image", channel_wise=True),
-                ConvertToBinaryLabeld(keys="label", lowest_positive=lowest_positive_isup_grade),
+                ConvertToBinaryLabeld(
+                    keys="label", lowest_positive=lowest_positive_isup_grade
+                ),
             ]
         )
 
         self.preprocess = preprocess if preprocess is not None else default_preprocess
+
+        self.invert_and_save = T.Compose(
+            [
+                T.Invertd(
+                    keys="pred",
+                    transform=self.preprocess,
+                    orig_keys="label",
+                    meta_keys="pred_meta_dict",
+                    orig_meta_keys="image_meta_dict",
+                    meta_key_postfix="meta_dict",
+                    nearest_interp=True,
+                    to_tensor=True,
+                    device="cpu",
+                ),
+                T.SaveImaged(
+                    keys="pred",
+                    output_dir="./data/picai/pred/",
+                    output_postfix="pred",
+                    separate_folder=False
+                )
+            ]
+        )
 
         augment_spatial = T.Compose(
             [
@@ -200,7 +224,7 @@ class PICAIDataModule(pl.LightningDataModule):
         )
 
     def test_dataloader(self):
-        return DataLoader(self.test_set, batch_size=self.batch_size)
+        return DataLoader(self.test_set, batch_size=1, num_workers=self.num_workers)
 
 
 class ConvertToMultiChanneld(T.MapTransform):
