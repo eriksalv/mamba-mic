@@ -25,7 +25,6 @@ class System(pl.LightningModule):
         slice_batch_size=None,
         save_output=False,
         log_hd95=True,
-        name="test",
     ) -> None:
         super().__init__()
         self.net = net
@@ -33,7 +32,6 @@ class System(pl.LightningModule):
         self.softmax = softmax
         self.include_background = include_background
         self.save_output = save_output
-        self.name = name
 
         assert (num_output_channels is None and softmax is False) or (
             num_output_channels is not None and softmax is True

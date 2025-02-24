@@ -13,6 +13,7 @@ class PICAIDataModule(pl.LightningDataModule):
         self,
         batch_size: int,
         data_dir="/cluster/projects/vc/data/mic/open/Prostate/PI-CAI/preped-images/images/",
+        train_frac=0.8,
         val_frac=0.1,
         test_frac=0.1,
         use_test_for_val=False,
@@ -20,18 +21,19 @@ class PICAIDataModule(pl.LightningDataModule):
         cache_rate=0.0,
         preprocess=None,
         augment=None,
-        filter_empty_labels=False,
-        lowest_positive_isup_grade=2,
+        lowest_positive_isup_grade=1,  # 0 = ISUP<=1, 1 = AI, 2-5 = Human-expert
+        name="picai",
     ):
         super().__init__()
         self.data_dir = data_dir
         self.batch_size = batch_size
+        self.train_frac = train_frac
         self.val_frac = val_frac
         self.test_frac = test_frac
         self.use_test_for_val = use_test_for_val
         self.num_workers = num_workers
         self.cache_rate = cache_rate
-        self.filter_empty_labels = filter_empty_labels
+        self.name = name
 
         default_preprocess = T.Compose(
             [
@@ -82,10 +84,10 @@ class PICAIDataModule(pl.LightningDataModule):
                 ),
                 T.SaveImaged(
                     keys="pred",
-                    output_dir="./data/picai/pred/",
-                    output_postfix="pred",
-                    separate_folder=False
-                )
+                    output_dir=f"./data/picai/pred/{self.name}",
+                    output_postfix=self.name,
+                    separate_folder=False,
+                ),
             ]
         )
 
@@ -170,31 +172,36 @@ class PICAIDataModule(pl.LightningDataModule):
             {"image": img, "label": lbl} for img, lbl in zip(image_files, label_files)
         ]
 
-        if self.filter_empty_labels:
-            print(f"Subjects before filtering: {len(self.subjects_with_ground_truth)}")
-            self.subjects_with_ground_truth = [
-                s
-                for s in self.subjects_with_ground_truth
-                if np.any(T.LoadImage()(s["label"]) >= 2)
-            ]
-            print(f"Subjects after filtering: {len(self.subjects_with_ground_truth)}")
+        self.human_expert_labels = [
+            s
+            for s in self.subjects_with_ground_truth
+            if np.any(T.LoadImage()(s["label"]) >= 2)
+        ]
+        self.ai_labels = [
+            s
+            for s in self.subjects_with_ground_truth
+            if np.any(T.LoadImage()(s["label"]) == 1)
+        ]
+        print(f"Num AI labels: {len(self.ai_labels)}")
+        print(f"Num Human expert labels: {len(self.human_expert_labels)}")
 
     def setup(self, stage=None):
-        train_subjects, val_subjects, test_subjects = random_split(
-            self.subjects_with_ground_truth,
-            [1 - self.val_frac - self.test_frac, self.val_frac, self.test_frac],
+        train_subjects_human, val_subjects_human, test_subjects_human = random_split(
+            self.human_expert_labels,
+            [self.train_frac, self.val_frac, self.test_frac],
             generator=torch.Generator().manual_seed(42),
         )
 
         # Assign train/val datasets for use in dataloaders
         if stage == "fit" or stage is None:
             self.train_set = CacheDataset(
-                train_subjects,
+                # Use human labels + AI labels only for training
+                train_subjects_human + self.ai_labels,
                 transform=T.Compose([self.preprocess, self.augment]),
                 cache_rate=self.cache_rate,
             )
             self.val_set = CacheDataset(
-                val_subjects,
+                val_subjects_human,
                 transform=self.preprocess,
                 cache_rate=0.0,
             )
@@ -202,7 +209,7 @@ class PICAIDataModule(pl.LightningDataModule):
         # Assign test dataset for use in dataloader(s)
         if stage == "test" or stage is None:
             self.test_set = CacheDataset(
-                test_subjects,
+                test_subjects_human,
                 transform=self.preprocess,
                 cache_rate=0.0,
             )

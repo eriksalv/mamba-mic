@@ -1,7 +1,6 @@
 class_path: system.System
 init_args:
   include_background: true
-  log_hd95: true
   net:
     class_path: monai.networks.nets.dynunet.DynUNet
     init_args:
@@ -48,7 +47,7 @@ init_args:
           - 2
         - - 2
           - 2
-          - 2
+          - 1
         - - 2
           - 2
           - 1
@@ -67,14 +66,14 @@ init_args:
           - 2
         - - 2
           - 2
-          - 2
+          - 1
         - - 2
           - 2
           - 1
   val_inferer:
     class_path: monai.inferers.SlidingWindowInferer
     init_args:
-      roi_size: [256, 256, 32]
-      sw_batch_size: 4
+      roi_size: [256, 256, 24]
+      sw_batch_size: 6
       overlap: 0.5
       mode: gaussian
