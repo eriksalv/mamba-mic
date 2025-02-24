@@ -21,7 +21,6 @@ class PICAIDataModule(pl.LightningDataModule):
         cache_rate=0.0,
         preprocess=None,
         augment=None,
-        lowest_positive_isup_grade=1,  # 0 = ISUP<=1, 1 = AI, 2-5 = Human-expert
         name="picai",
     ):
         super().__init__()
@@ -61,9 +60,7 @@ class PICAIDataModule(pl.LightningDataModule):
                     keys="image", lower=None, upper=99, channel_wise=True
                 ),
                 T.NormalizeIntensityd(keys="image", channel_wise=True),
-                ConvertToBinaryLabeld(
-                    keys="label", lowest_positive=lowest_positive_isup_grade
-                ),
+                ConvertToBinaryLabeld(keys="label"),
             ]
         )
 
@@ -257,10 +254,6 @@ class ConvertToMultiChanneld(T.MapTransform):
 
 
 class ConvertToBinaryLabeld(T.MapTransform):
-    def __init__(self, keys, lowest_positive):
-        super().__init__(keys)
-        self.lowest_positive = lowest_positive
-
     def __call__(self, data):
         d = dict(data)
         for key in self.keys:
@@ -268,6 +261,6 @@ class ConvertToBinaryLabeld(T.MapTransform):
                 label = d[key]  # Extract label tensor
 
                 # Convert to binary: 0 for ISUP ≤1, 1 for ISUP ≥2
-                d[key] = (label >= self.lowest_positive).float()
+                d[key] = (label >= 1).float()
 
         return d

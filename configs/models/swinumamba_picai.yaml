@@ -1,7 +1,6 @@
 class_path: system.System
 init_args:
   include_background: true
-  log_hd95: true
   do_slice_inference: true
   slice_shape: [256, 256]
   slice_dim: 2

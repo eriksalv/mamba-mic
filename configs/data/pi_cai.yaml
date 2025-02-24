@@ -3,7 +3,6 @@ init_args:
   batch_size: 6
   num_workers: 10
   cache_rate: 0.5
-  lowest_positive_isup_grade: 1
   train_frac: 0.7
   val_frac: 0.2
   test_frac: 0.1

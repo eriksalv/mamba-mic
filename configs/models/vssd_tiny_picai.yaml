@@ -1,18 +1,17 @@
 class_path: system.System
 init_args:
   include_background: true
-  log_hd95: true
   do_slice_inference: true
-  slice_shape: [256, 256]
+  slice_shape: [384, 384]
   slice_dim: 2
-  slice_batch_size: 32
+  slice_batch_size: 24
   net:
     class_path: models.unet.UNet
     init_args: 
       encoder:
         class_path: models.vssd.Backbone_VSSD
         init_args:
-          img_size: 256
+          img_size: 384
           patch_size: 4
           num_classes: 1
           embed_dim: 64

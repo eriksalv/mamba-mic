@@ -1,7 +1,6 @@
 class_path: system.System
 init_args:
   include_background: true
-  log_hd95: true
   net:
     class_path: models.umamba.UMambaEnc
     init_args: 

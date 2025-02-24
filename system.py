@@ -24,7 +24,6 @@ class System(pl.LightningModule):
         slice_dim=None,
         slice_batch_size=None,
         save_output=False,
-        log_hd95=True,
     ) -> None:
         super().__init__()
         self.net = net

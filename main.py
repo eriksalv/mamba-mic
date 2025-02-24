@@ -8,7 +8,11 @@ import torch
 class MyLightningCLI(LightningCLI):
     def add_arguments_to_parser(self, parser):
         parser.add_argument("--wandb.project", default="monai-runs")
+        parser.add_argument("--name")
         parser.add_argument("--wandb.name")
+
+        parser.link_arguments("name", "wandb.name")
+        parser.link_arguments("name", "data.init_args.name")
 
     def before_fit(self):
         wandb_config = self.config_dump["wandb"]
