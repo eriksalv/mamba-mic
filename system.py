@@ -123,7 +123,7 @@ class System(pl.LightningModule):
 
         y_hat_binarized = self.post_pred(y_hat)
 
-        if self.save_output:
+        if self.trainer.state.fn in ["test", "predict"] and self.save_output:
             batch["image"] = batch["image"].unsqueeze(0)
             batch["label"] = batch["label"].unsqueeze(0)
             batch["pred"] = y_hat_binarized.squeeze(0)

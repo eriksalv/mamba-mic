@@ -81,7 +81,7 @@ class PICAIDataModule(pl.LightningDataModule):
                 ),
                 T.SaveImaged(
                     keys="pred",
-                    output_dir=f"./data/picai/pred/{self.name}",
+                    output_dir=f"./data/pred/picai/{self.name}",
                     output_postfix=self.name,
                     separate_folder=False,
                 ),
