@@ -35,4 +35,6 @@ def get_kernels_strides(sizes=[128, 128, 128], spacings=[1.0, 1.0, 1.0]):
 
 
 if __name__ == "__main__":
-    print(get_kernels_strides(sizes=[256, 256, 32], spacings=[0.5, 0.5, 3.0]))
+    kernels, strides = get_kernels_strides(sizes=[256, 256, 24], spacings=[0.5, 0.5, 3])
+    print(f"Kernels: {kernels}")
+    print(f"Strides: {strides}")
