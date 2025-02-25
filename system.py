@@ -1,62 +1,94 @@
 import torch
 import lightning.pytorch as pl
-from monai.metrics import DiceMetric, HausdorffDistanceMetric
-from monai.losses.dice import DiceCELoss
-from monai.inferers import Inferer
+from monai.metrics import (
+    DiceMetric,
+    HausdorffDistanceMetric,
+    ConfusionMatrixMetric,
+)
+from monai.inferers import Inferer, SliceInferer
 from monai.transforms import Compose, Activations, AsDiscrete
+from monai.losses.dice import DiceFocalLoss
 
 
 class System(pl.LightningModule):
     def __init__(
         self,
         net: torch.nn.Module,
-        val_inferer: Inferer,
+        val_inferer: Inferer = None,
         lr=0.001,
         softmax=False,
         include_background=True,
         num_output_channels=None,
-        log_hd95=True
+        do_slice_inference=False,
+        slice_shape=None,
+        slice_dim=None,
+        slice_batch_size=None,
+        save_output=False,
     ) -> None:
         super().__init__()
         self.net = net
-        self.val_inferer = val_inferer
         self.lr = lr
         self.softmax = softmax
         self.include_background = include_background
-        self.log_hd95 = log_hd95
+        self.save_output = save_output
 
         assert (num_output_channels is None and softmax is False) or (
             num_output_channels is not None and softmax is True
         ), "num_output_channels should only be set if softmax is True"
 
-        self.criterion = DiceCELoss(
+        self.criterion = DiceFocalLoss(
             include_background=include_background,
             sigmoid=not softmax,
             softmax=softmax,
             squared_pred=True,
+            gamma=0.5,
         )
-        self.dice_metric = DiceMetric(
-            include_background=include_background, reduction="none"
-        )
-        self.hd95_metric = HausdorffDistanceMetric(
-            include_background=include_background,
-            distance_metric="euclidean",
-            percentile=95,
-            reduction="none",
-        )
+
+        self.metrics = {
+            "dice": DiceMetric(
+                include_background=include_background, reduction="mean_batch"
+            ),
+            "hd95": HausdorffDistanceMetric(
+                include_background=include_background,
+                distance_metric="euclidean",
+                percentile=95,
+                reduction="mean_batch",
+            ),
+            "precision": ConfusionMatrixMetric(
+                metric_name="precision", reduction="mean_batch"
+            ),
+        }
 
         self.post_pred = (
             Compose([AsDiscrete(argmax=True, dim=1, to_onehot=num_output_channels)])
             if softmax
             else Compose(
                 [
-                    Activations(
-                        sigmoid=True if not softmax else False, softmax=softmax
-                    ),
+                    Activations(sigmoid=True, softmax=False),
                     AsDiscrete(threshold=0.5),
                 ]
             )
         )
+
+        self.do_slice_inference = do_slice_inference
+        if do_slice_inference:
+            assert (
+                slice_dim is not None
+                and slice_shape is not None
+                and slice_batch_size is not None
+            ), (
+                "slice_dim, slice_shape and slice_batch_size must be specified if do_slice_inference is True"
+            )
+            self.slice_inferer = SliceInferer(
+                roi_size=slice_shape,
+                sw_batch_size=slice_batch_size,
+                spatial_dim=slice_dim,
+            )
+        else:
+            assert val_inferer is not None, (
+                "val_inferer must be specified if do_slice_inference is False"
+            )
+            self.val_inferer = val_inferer
 
         self.save_hyperparameters()
 
@@ -69,64 +101,63 @@ class System(pl.LightningModule):
 
         x, y = batch["image"], batch["label"]
 
+        if self.do_slice_inference:
+            return self.slice_inferer(inputs=x, network=self.net), y, x
+
         if val is False:
-            y_hat = self(x)
-        else:
-            y_hat = self.val_inferer(inputs=x, network=self.net)
-            
-        return y_hat, y
+            return self(x), y, x
+
+        return self.val_inferer(inputs=x, network=self.net), y, x
 
     def training_step(self, batch, batch_idx):
-        y_hat, y = self.infer_batch(batch)
+        y_hat, y, _ = self.infer_batch(batch)
         loss = self.criterion(y_hat, y)
 
         self.log("train_loss", loss, prog_bar=True)
 
         return loss
-    
+
     def _shared_eval_step(self, batch, batch_idx):
-        y_hat, y = self.infer_batch(batch, val=True)
+        y_hat, y, x = self.infer_batch(batch, val=True)
         loss = self.criterion(y_hat, y)
 
         y_hat_binarized = self.post_pred(y_hat)
 
-        self.dice_metric(y_hat_binarized, y)
-        
-        if self.log_hd95:
-            self.hd95_metric(y_hat_binarized, y)
-        
+        if self.trainer.state.fn in ["test", "predict"] and self.save_output:
+            batch["image"] = batch["image"].unsqueeze(0)
+            batch["label"] = batch["label"].unsqueeze(0)
+            batch["pred"] = y_hat_binarized.squeeze(0)
+            self.trainer.datamodule.invert_and_save(batch)
+
+        for metric in self.metrics.values():
+            metric(y_hat_binarized, y)
+
         return loss
 
     def validation_step(self, batch, batch_idx):
         loss = self._shared_eval_step(batch, batch_idx)
         self.log("val_loss", loss, sync_dist=True)
         return {"val_loss": loss}
-    
+
     def test_step(self, batch, batch_idx):
         loss = self._shared_eval_step(batch, batch_idx)
         self.log("test_loss", loss, sync_dist=True)
         return {"test_loss": loss}
 
     def _shared_on_epoch_end(self, stage="val"):
-        per_channel_dice = self.dice_metric.aggregate().nanmean(dim=0)
-        self.dice_metric.reset()
+        metrics = {}
+        for name, metric in self.metrics.items():
+            per_channel = metric.aggregate()
+            per_channel = (
+                per_channel[0] if isinstance(per_channel, list) else per_channel
+            )
 
-        metrics = {f"{stage}_dice": per_channel_dice.mean()}
+            for i in range(len(per_channel)):
+                metrics[f"channel{i}/{stage}_{name}"] = per_channel[i]
 
-        num_channels = len(per_channel_dice)
-        for i in range(num_channels):
-            metrics[f"channel{i}/{stage}_dice"] = per_channel_dice[i]
-        
-        if self.log_hd95:
-            per_channel_hd95 = self.hd95_metric.aggregate().nanmean(dim=0)
-            self.hd95_metric.reset()
+            metrics[f"{stage}_{name}"] = per_channel.mean()
+            metric.reset()
 
-            metrics[f"{stage}_hd95"] = per_channel_hd95.mean()
-
-            num_channels = len(per_channel_hd95)
-            for i in range(num_channels):
-                metrics[f"channel{i}/{stage}_hd95"] = per_channel_hd95[i]
-        
         self.log_dict(metrics, sync_dist=True)
 
     def on_validation_epoch_end(self):

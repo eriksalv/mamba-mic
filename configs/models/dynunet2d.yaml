@@ -1,0 +1,56 @@
+class_path: system.System
+init_args:
+  include_background: true
+  do_slice_inference: true
+  slice_shape: [384, 384]
+  slice_dim: 2
+  slice_batch_size: 24
+  net:
+    class_path: monai.networks.nets.dynunet.DynUNet
+    init_args:
+      spatial_dims: 2
+      in_channels: 3
+      out_channels: 1
+      kernel_size:
+        - - 3
+          - 3
+        - - 3
+          - 3
+        - - 3
+          - 3
+        - - 3
+          - 3
+        - - 3
+          - 3
+        - - 3
+          - 3
+        - - 3
+          - 3
+      strides:
+        - - 1
+          - 1
+        - - 2
+          - 2
+        - - 2
+          - 2
+        - - 2
+          - 2
+        - - 2
+          - 2
+        - - 2
+          - 2
+        - - 2
+          - 2
+      upsample_kernel_size:
+        - - 2
+          - 2
+        - - 2
+          - 2
+        - - 2
+          - 2
+        - - 2
+          - 2
+        - - 2
+          - 2
+        - - 2
+          - 2

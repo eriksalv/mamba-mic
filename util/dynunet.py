@@ -1,6 +1,3 @@
-from monai.networks.nets.dynunet import DynUNet
-
-
 # Code from: https://github.com/Project-MONAI/tutorials/blob/main/modules/dynunet_pipeline/create_network.py
 def get_kernels_strides(sizes=[128, 128, 128], spacings=[1.0, 1.0, 1.0]):
     """
@@ -38,4 +35,6 @@ def get_kernels_strides(sizes=[128, 128, 128], spacings=[1.0, 1.0, 1.0]):
 
 
 if __name__ == "__main__":
-    print(get_kernels_strides(sizes=[192, 192, 48], spacings=[0.5, 0.5, 1.2]))
+    kernels, strides = get_kernels_strides(sizes=[256, 256, 24], spacings=[0.5, 0.5, 3])
+    print(f"Kernels: {kernels}")
+    print(f"Strides: {strides}")
