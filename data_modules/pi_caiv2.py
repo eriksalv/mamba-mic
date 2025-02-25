@@ -17,6 +17,7 @@ class PICAIV2DataModule(pl.LightningDataModule):
         label_dir = "/cluster/projects/vc/data/mic/open/Prostate/PI-CAI-V2.0/picai_labels/csPCa_lesion_delineations/human_expert/resampled",
         ai_label_dir = "/cluster/projects/vc/data/mic/open/Prostate/PI-CAI-V2.0/picai_labels/csPCa_lesion_delineations/AI/Bosma22a",
         include_ai_labels = True,
+        include_empty_eval = False,
         val_frac=0.1,
         test_frac=0.1,
         use_test_for_val=False,
@@ -30,6 +31,7 @@ class PICAIV2DataModule(pl.LightningDataModule):
         self.label_dir = label_dir
         self.ai_label_dir = ai_label_dir
         self.include_ai_labels = include_ai_labels
+        self.include_empty_eval = include_empty_eval
         self.batch_size = batch_size
         self.val_frac = val_frac
         self.test_frac = test_frac
@@ -123,6 +125,7 @@ class PICAIV2DataModule(pl.LightningDataModule):
 
         self.val_transform = [
                         self.preprocess,
+                        StackImages(keys=["t2w", "adc", "hbv"])
                     ]
         
         self.val_transform = T.Compose(self.val_transform)
@@ -188,8 +191,9 @@ class PICAIV2DataModule(pl.LightningDataModule):
             generator=torch.Generator().manual_seed(42)
         )
          # Filter out zero-filled labels from validation and test sets
-        val_subjects = self.filter_empty_labels(val_subjects)
-        test_subjects = self.filter_empty_labels(test_subjects)
+        if not self.include_empty_eval:
+            val_subjects = self.filter_empty_labels(val_subjects)
+            test_subjects = self.filter_empty_labels(test_subjects)
 
         # Sanity check
         print("Training subjects:", len(train_subjects))
@@ -282,12 +286,20 @@ class ConvertToMultiChanneld(T.MapTransform):
         return d
 
 class ConvertToBinaryLabeld(T.MapTransform):
+    def __init__(self, keys: list, invertible=True, allow_missing_keys=True):
+        self.keys = keys
+        self.invertible = invertible
+        self.allow_missing_keys = allow_missing_keys
     def __call__(self, data):
         d = dict(data)
         for key in self.keys:
             if key in data:
                 label = d[key]  # Extract label tensor
                 
+                if self.invertible:
+                    # Store the original label tensor for later inversion
+                    d[f"original_{key}"] = label.clone()
+
                 # Convert to binary: 0 for ISUP ≤1, 1 for ISUP ≥2
                 d[key] = (label >= 1).float()
                 
