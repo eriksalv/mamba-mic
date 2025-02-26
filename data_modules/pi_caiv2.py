@@ -18,8 +18,9 @@ class PICAIV2DataModule(pl.LightningDataModule):
         ai_label_dir = "/cluster/projects/vc/data/mic/open/Prostate/PI-CAI-V2.0/picai_labels/csPCa_lesion_delineations/AI/Bosma22a",
         include_ai_labels = True,
         include_empty_eval = False,
-        val_frac=0.1,
+        val_frac=0.2,
         test_frac=0.1,
+        train_frac = 0.7,
         use_test_for_val=False,
         num_workers=4,
         cache_rate=0.0,
@@ -35,6 +36,7 @@ class PICAIV2DataModule(pl.LightningDataModule):
         self.batch_size = batch_size
         self.val_frac = val_frac
         self.test_frac = test_frac
+        self.train_frac = train_frac
         self.use_test_for_val = use_test_for_val
         self.num_workers = num_workers
         self.cache_rate = cache_rate
@@ -148,10 +150,11 @@ class PICAIV2DataModule(pl.LightningDataModule):
             patient_folder = os.path.join(self.image_dir, patient_id)
             
             # Find all file paths
-            label_paths = glob(os.path.join(self.label_dir, f"{patient_id}_*.nii.gz"))
-            t2w_paths = glob(os.path.join(patient_folder, "*_t2w.mha"))
-            adc_paths = glob(os.path.join(patient_folder, "*_adc.mha"))
-            hbv_paths = glob(os.path.join(patient_folder, "*_hbv.mha"))
+            label_paths = sorted(glob(os.path.join(self.label_dir, f"{patient_id}_*.nii.gz")))
+            t2w_paths = sorted(glob(os.path.join(patient_folder, "*_t2w.mha")))
+            adc_paths = sorted(glob(os.path.join(patient_folder, "*_adc.mha")))
+            hbv_paths = sorted(glob(os.path.join(patient_folder, "*_hbv.mha")))
+
             
             # Identify the case IDs by extracting the common identifier part from the filenames
             case_ids = set()
@@ -168,15 +171,18 @@ class PICAIV2DataModule(pl.LightningDataModule):
                 case_hbv = [path for path in hbv_paths if case_id in path]
                 case_label = [path for path in label_paths if case_id in path]
                 
+                label_type = "human"
                 if not case_label and self.include_ai_labels:
                     case_label = glob(f"{self.ai_label_dir}/{case_id}.nii.gz")
+                    label_type = "ai"
                 # Ensure all required files exist before adding to data
                 if case_t2w and case_adc and case_hbv and case_label:
                     data.append({
                         "t2w": case_t2w,
                         "adc": case_adc,
                         "hbv": case_hbv,
-                        "label": case_label
+                        "label": case_label,
+                        "type": label_type
                     })
                     
 
@@ -185,15 +191,31 @@ class PICAIV2DataModule(pl.LightningDataModule):
         self.subjects_with_ground_truth = data
 
     def setup(self, stage=None):
-        train_subjects, val_subjects, test_subjects = random_split(
-            self.subjects_with_ground_truth,
-            [1 - self.val_frac - self.test_frac, self.val_frac, self.test_frac], 
-            generator=torch.Generator().manual_seed(42)
+
+        human_labels = [sample for sample in self.subjects_with_ground_truth if sample["type"] == "human"]
+        ai_labels = [sample for sample in self.subjects_with_ground_truth if sample["type"] == "ai"]
+
+        non_empty_human, empty_human = self.filter_empty_labels(human_labels)
+
+        train_subjects_human, val_subjects_human, test_subjects_human = random_split(
+            non_empty_human,
+            [self.train_frac, self.val_frac, self.test_frac],
+            generator=torch.Generator().manual_seed(42),
         )
+
+        train_subjects_empty, val_subjects_empty, test_subjects_empty = random_split(
+            empty_human,
+            [self.train_frac, self.val_frac, self.test_frac],
+            generator=torch.Generator().manual_seed(42),
+        )
+
+        train_subjects = train_subjects_human + ai_labels + train_subjects_empty
+        val_subjects = val_subjects_human + val_subjects_empty
+        test_subjects = test_subjects_human + test_subjects_empty
          # Filter out zero-filled labels from validation and test sets
         if not self.include_empty_eval:
-            val_subjects = self.filter_empty_labels(val_subjects)
-            test_subjects = self.filter_empty_labels(test_subjects)
+            val_subjects, _ = self.filter_empty_labels(val_subjects)
+            test_subjects, _ = self.filter_empty_labels(test_subjects)
 
         # Sanity check
         print("Training subjects:", len(train_subjects))
@@ -252,7 +274,9 @@ class PICAIV2DataModule(pl.LightningDataModule):
     
     def filter_empty_labels(self, subjects):
         """Filter out subjects with labels filled with zeros using SimpleITK."""
-        filtered_subjects = []
+        non_empty_subjects = []
+        empty_subjects = []
+
         for subject in subjects:
             label_path = subject['label'][0]  
             label_image = sitk.ReadImage(label_path)
@@ -261,10 +285,12 @@ class PICAIV2DataModule(pl.LightningDataModule):
             label_data = sitk.GetArrayFromImage(label_image)
 
             # Only keep the subject if the label is not all zeros
-            if not np.all(label_data == 0):
-                filtered_subjects.append(subject)
+            if np.all(label_data == 0):
+                empty_subjects.append(subject)
+            else:
+                non_empty_subjects.append(subject)
         
-        return filtered_subjects
+        return non_empty_subjects, empty_subjects
 
 class ConvertToMultiChanneld(T.MapTransform):
     def __call__(self, data):
