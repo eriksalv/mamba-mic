@@ -59,6 +59,8 @@ class System(pl.LightningModule):
             ),
         }
 
+        self.empty_criterion = torch.nn.BCEWithLogitsLoss()
+
         self.post_pred = (
             Compose([AsDiscrete(argmax=True, dim=1, to_onehot=num_output_channels)])
             if softmax
@@ -102,23 +104,46 @@ class System(pl.LightningModule):
         x, y = batch["image"], batch["label"]
 
         if self.do_slice_inference:
-            return self.slice_inferer(inputs=x, network=self.net), y, x
+            return self.slice_inferer(inputs=x, network=self.net), y
 
-        if val is False:
-            return self(x), y, x
+        if val:
+            return self.val_inferer(inputs=x, network=self.net), y
 
-        return self.val_inferer(inputs=x, network=self.net), y, x
+        return self(x), y
 
     def training_step(self, batch, batch_idx):
-        y_hat, y, _ = self.infer_batch(batch)
-        loss = self.criterion(y_hat, y)
+        y_hat, y = self.infer_batch(batch)
+
+        # Create mask for empty labels (entire label tensor is 0)
+        empty_labels_mask = torch.all(y == 0, dim=(1, 2, 3, 4))  # Shape: [batch_size]
+
+        # Compute loss for non-empty labels
+        masked_y_hat = y_hat[~empty_labels_mask, ...]
+        masked_y = y[~empty_labels_mask, ...]
+
+        if masked_y_hat.numel() > 0 and masked_y.numel() > 0:
+            non_empty_loss = self.criterion(masked_y_hat, masked_y)
+        else:
+            non_empty_loss = torch.tensor(0.0, device=y_hat.device)
+
+        # Compute loss for empty labels (all zeros)
+        empty_masked_y_hat = y_hat[empty_labels_mask, ...]
+        empty_masked_y = y[empty_labels_mask, ...]
+
+        if empty_masked_y_hat.numel() > 0 and empty_masked_y.numel() > 0:
+            empty_loss = self.empty_criterion(empty_masked_y_hat, empty_masked_y)
+        else:
+            empty_loss = torch.tensor(0.0, device=y_hat.device)
+
+        # Total loss
+        loss = non_empty_loss + empty_loss
 
         self.log("train_loss", loss, prog_bar=True)
 
         return loss
 
     def _shared_eval_step(self, batch, batch_idx):
-        y_hat, y, x = self.infer_batch(batch, val=True)
+        y_hat, y = self.infer_batch(batch, val=True)
         loss = self.criterion(y_hat, y)
 
         y_hat_binarized = self.post_pred(y_hat)
