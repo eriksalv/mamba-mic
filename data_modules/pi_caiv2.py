@@ -18,6 +18,7 @@ class PICAIV2DataModule(pl.LightningDataModule):
         label_dir="/cluster/projects/vc/data/mic/open/Prostate/PI-CAI-V2.0/picai_labels/csPCa_lesion_delineations/human_expert/resampled",
         ai_label_dir="/cluster/projects/vc/data/mic/open/Prostate/PI-CAI-V2.0/picai_labels/csPCa_lesion_delineations/AI/Bosma22a",
         include_ai_labels=True,
+        filter_empty_labels_for_training=False,
         include_empty_eval=False,
         val_frac=0.2,
         test_frac=0.1,
@@ -39,6 +40,7 @@ class PICAIV2DataModule(pl.LightningDataModule):
         self.train_frac = train_frac
         self.num_workers = num_workers
         self.cache_rate = cache_rate
+        self.filter_empty_labels_for_training = filter_empty_labels_for_training
 
         default_preprocess = T.Compose(
             [
@@ -215,6 +217,13 @@ class PICAIV2DataModule(pl.LightningDataModule):
         print(f"Number of images: {len(data)}")
         # Store subject dictionaries
         self.subjects_with_ground_truth = data
+
+        if self.filter_empty_labels_for_training:
+            self.subjects_with_ground_truth = self.filter_empty_labels(data)[0]
+
+            print(
+                f"Number of non-empty labeled images: {len(self.subjects_with_ground_truth)}"
+            )
 
     def setup(self, stage=None):
         human_labels = [
