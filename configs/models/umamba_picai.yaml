@@ -4,10 +4,10 @@ init_args:
   net:
     class_path: models.umamba.UMambaEnc
     init_args: 
-      input_size: [256, 256, 32]
+      input_size: [256, 256, 24]
       input_channels: 3
       n_stages: 7
-      features_per_stage: [32, 64, 128, 256, 320, 320, 512]
+      features_per_stage: [32, 64, 128, 256, 320, 320, 320]
       kernel_sizes:
         - - 3
           - 3
@@ -58,7 +58,7 @@ init_args:
   val_inferer:
     class_path: monai.inferers.SlidingWindowInferer
     init_args:
-      roi_size: [256, 256, 32]
+      roi_size: [256, 256, 24]
       sw_batch_size: 4
       overlap: 0.5
       mode: gaussian

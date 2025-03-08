@@ -2,10 +2,11 @@ import torch
 import torch.nn.functional as F
 import monai.transforms as T
 from einops import rearrange
+from monai.config.type_definitions import KeysCollection
 
 
 class ConcatAdjacentSlicesToChannelsd(T.MapTransform):
-    def __init__(self, keys: list, n_adjacent_slices=1):
+    def __init__(self, keys: KeysCollection, n_adjacent_slices=1):
         super().__init__(keys)
         self.n_adjacent_slices = n_adjacent_slices
 

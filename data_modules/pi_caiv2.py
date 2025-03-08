@@ -273,12 +273,7 @@ class PICAIV2DataModule(pl.LightningDataModule):
             )
             self.val_set = CacheDataset(
                 val_subjects,
-                transform=T.Compose(
-                    [
-                        self.preprocess,
-                        StackImages(keys=["t2w", "adc", "hbv"]),
-                    ]
-                ),
+                transform=self.preprocess,
                 cache_rate=0.0,
             )
 
@@ -286,12 +281,7 @@ class PICAIV2DataModule(pl.LightningDataModule):
         if stage == "test" or stage is None:
             self.test_set = CacheDataset(
                 test_subjects,
-                transform=T.Compose(
-                    [
-                        self.preprocess,
-                        StackImages(keys=["t2w", "adc", "hbv"]),
-                    ]
-                ),
+                transform=self.preprocess,
                 cache_rate=0.0,
             )
 
@@ -306,13 +296,13 @@ class PICAIV2DataModule(pl.LightningDataModule):
     def val_dataloader(self):
         return DataLoader(
             self.val_set,
-            batch_size=self.batch_size,
+            batch_size=1,
             num_workers=self.num_workers,
             shuffle=False,
         )
 
     def test_dataloader(self):
-        return DataLoader(self.test_set, batch_size=self.batch_size)
+        return DataLoader(self.test_set, batch_size=1)
 
     def filter_empty_labels(self, subjects):
         """Filter out subjects with labels filled with zeros using SimpleITK."""
