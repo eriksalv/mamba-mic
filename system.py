@@ -7,7 +7,7 @@ from monai.metrics import (
 )
 from monai.inferers import Inferer, SliceInferer
 from monai.transforms import Compose, Activations, AsDiscrete
-from monai.losses.dice import DiceFocalLoss
+from monai.losses.dice import FocalLoss
 
 
 class System(pl.LightningModule):
@@ -36,12 +36,10 @@ class System(pl.LightningModule):
             num_output_channels is not None and softmax is True
         ), "num_output_channels should only be set if softmax is True"
 
-        self.criterion = DiceFocalLoss(
+        self.criterion = FocalLoss(
             include_background=include_background,
-            sigmoid=not softmax,
-            softmax=softmax,
-            squared_pred=True,
-            gamma=0.5,
+            gamma=1.0,
+            alpha=0.90
         )
 
         self.metrics = {
@@ -54,12 +52,11 @@ class System(pl.LightningModule):
                 percentile=95,
                 reduction="mean_batch",
             ),
-            "precision": ConfusionMatrixMetric(
-                metric_name="precision", reduction="mean_batch"
+            "confusion_matrix": ConfusionMatrixMetric(
+                metric_name=["accuracy", "precision", "sensitivity", "f1 score"],
+                reduction="mean_batch",
             ),
         }
-
-        self.empty_criterion = torch.nn.BCEWithLogitsLoss()
 
         self.post_pred = (
             Compose([AsDiscrete(argmax=True, dim=1, to_onehot=num_output_channels)])
@@ -113,30 +110,7 @@ class System(pl.LightningModule):
 
     def training_step(self, batch, batch_idx):
         y_hat, y = self.infer_batch(batch)
-
-        # Create mask for empty labels (entire label tensor is 0)
-        empty_labels_mask = torch.all(y == 0, dim=(1, 2, 3, 4))  # Shape: [batch_size]
-
-        # Compute loss for non-empty labels
-        masked_y_hat = y_hat[~empty_labels_mask, ...]
-        masked_y = y[~empty_labels_mask, ...]
-
-        if masked_y_hat.numel() > 0 and masked_y.numel() > 0:
-            non_empty_loss = self.criterion(masked_y_hat, masked_y)
-        else:
-            non_empty_loss = torch.tensor(0.0, device=y_hat.device)
-
-        # Compute loss for empty labels (all zeros)
-        empty_masked_y_hat = y_hat[empty_labels_mask, ...]
-        empty_masked_y = y[empty_labels_mask, ...]
-
-        if empty_masked_y_hat.numel() > 0 and empty_masked_y.numel() > 0:
-            empty_loss = self.empty_criterion(empty_masked_y_hat, empty_masked_y)
-        else:
-            empty_loss = torch.tensor(0.0, device=y_hat.device)
-
-        # Total loss
-        loss = non_empty_loss + empty_loss
+        loss = self.criterion(y_hat, y)
 
         self.log("train_loss", loss, prog_bar=True)
 
@@ -148,10 +122,14 @@ class System(pl.LightningModule):
 
         y_hat_binarized = self.post_pred(y_hat)
 
-        if self.trainer.state.fn in ["test", "predict"] and self.save_output:
-            batch["image"] = batch["image"].unsqueeze(0)
-            batch["label"] = batch["label"].unsqueeze(0)
+        if (
+            self.trainer.state.fn in ["validate", "test", "predict"]
+            and self.save_output
+        ):
+            batch["image"] = batch["image"].squeeze(0)
+            batch["label"] = batch["label"].squeeze(0)
             batch["pred"] = y_hat_binarized.squeeze(0)
+            # batch["softmax"] = Activations(sigmoid=True, softmax=False)(y_hat_binarized).squeeze(0)
             self.trainer.datamodule.invert_and_save(batch)
 
         for metric in self.metrics.values():
@@ -173,15 +151,17 @@ class System(pl.LightningModule):
         metrics = {}
         for name, metric in self.metrics.items():
             per_channel = metric.aggregate()
-            per_channel = (
-                per_channel[0] if isinstance(per_channel, list) else per_channel
-            )
 
-            for i in range(len(per_channel)):
-                metrics[f"channel{i}/{stage}_{name}"] = per_channel[i]
+            if name == "confusion_matrix":
+                for conf_name, conf_metric in zip(metric.metric_name, per_channel):
+                    metrics[f"{stage}_{conf_name}"] = conf_metric.mean()
+                    metric.reset()
+            else:
+                for i in range(len(per_channel)):
+                    metrics[f"channel{i}/{stage}_{name}"] = per_channel[i]
 
-            metrics[f"{stage}_{name}"] = per_channel.mean()
-            metric.reset()
+                metrics[f"{stage}_{name}"] = per_channel.mean()
+                metric.reset()
 
         self.log_dict(metrics, sync_dist=True)
 

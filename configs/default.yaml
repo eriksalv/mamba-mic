@@ -2,7 +2,7 @@ wandb:
   project: brats2024
   name: example
 trainer:
-  max_epochs: 500
+  max_epochs: 300
   devices: auto
   accelerator: auto
   # max_time: 00:12:00:00
@@ -31,5 +31,5 @@ optimizer:
 lr_scheduler:
   class_path: torch.optim.lr_scheduler.CosineAnnealingLR
   init_args:
-    T_max: 500
+    T_max: 300
     eta_min: 0.000001

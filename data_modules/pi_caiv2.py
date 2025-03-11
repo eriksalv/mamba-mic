@@ -27,6 +27,7 @@ class PICAIV2DataModule(pl.LightningDataModule):
         cache_rate=0.0,
         preprocess=None,
         augment=None,
+        name="picaiv2"
     ):
         super().__init__()
         self.image_dir = image_dir
@@ -41,6 +42,7 @@ class PICAIV2DataModule(pl.LightningDataModule):
         self.num_workers = num_workers
         self.cache_rate = cache_rate
         self.filter_empty_labels_for_training = filter_empty_labels_for_training
+        self.name = name
 
         default_preprocess = T.Compose(
             [
@@ -155,9 +157,43 @@ class PICAIV2DataModule(pl.LightningDataModule):
             )
         )
 
-        self.val_transform = [self.preprocess, StackImages(keys=["t2w", "adc", "hbv"])]
-
-        self.val_transform = T.Compose(self.val_transform)
+        self.invert_and_save = T.Compose(
+            [
+                T.Invertd(
+                    keys="pred",
+                    transform=self.preprocess,
+                    orig_keys="label",
+                    meta_keys="pred_meta_dict",
+                    orig_meta_keys="image_meta_dict",
+                    meta_key_postfix="meta_dict",
+                    nearest_interp=True,
+                    to_tensor=True,
+                    device="cpu",
+                ),
+                T.Invertd(
+                    keys="label",
+                    transform=self.preprocess,
+                    orig_keys="label",
+                    meta_keys="label_meta_dict",
+                    orig_meta_keys="image_meta_dict",
+                    meta_key_postfix="meta_dict",
+                    nearest_interp=True,
+                    to_tensor=True,
+                    device="cpu",
+                ),
+                T.SaveImaged(
+                    keys="pred",
+                    output_dir=f"./data/pred/picaiv2/{self.name}",
+                    output_postfix='detection_map',
+                    separate_folder=False,
+                ), 
+                T.SaveImaged(
+                    keys="label",
+                    output_dir=f"./data/labels/picaiv2/{self.name}",
+                    output_postfix='label',
+                    separate_folder=False,
+                )]
+        )
 
         self.train_subjects = None
         self.test_subjects = None
@@ -218,13 +254,6 @@ class PICAIV2DataModule(pl.LightningDataModule):
         # Store subject dictionaries
         self.subjects_with_ground_truth = data
 
-        if self.filter_empty_labels_for_training:
-            self.subjects_with_ground_truth = self.filter_empty_labels(data)[0]
-
-            print(
-                f"Number of non-empty labeled images: {len(self.subjects_with_ground_truth)}"
-            )
-
     def setup(self, stage=None):
         human_labels = [
             sample
@@ -254,10 +283,14 @@ class PICAIV2DataModule(pl.LightningDataModule):
         train_subjects = train_subjects_human + ai_labels + train_subjects_empty
         val_subjects = val_subjects_human + val_subjects_empty
         test_subjects = test_subjects_human + test_subjects_empty
+
         # Filter out zero-filled labels from validation and test sets
         if not self.include_empty_eval:
             val_subjects, _ = self.filter_empty_labels(val_subjects)
             test_subjects, _ = self.filter_empty_labels(test_subjects)
+        
+        if self.filter_empty_labels_for_training:
+            train_subjects, _ = self.filter_empty_labels(train_subjects)
 
         # Sanity check
         print("Training subjects:", len(train_subjects))

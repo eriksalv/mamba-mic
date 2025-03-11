@@ -1,14 +1,13 @@
 class_path: system.System
 init_args:
   net:
-    class_path: monai.networks.nets.SegResNet
+    class_path: models.segmamba.SegMamba
     init_args:
-      in_channels: 3
-      out_channels: 1
-      spatial_dims: 3
-      init_filters: 32
-      blocks_down: [1, 2, 2, 4]
-      blocks_up: [1, 1, 1]
+      in_chans: 3
+      out_chans: 1
+      depths: [2, 2, 2, 2]
+      feat_size: [48, 96, 192, 384]
+      drop_path_rate: 0.2
   val_inferer:
     class_path: monai.inferers.SlidingWindowInferer
     init_args:
@@ -16,3 +15,4 @@ init_args:
       sw_batch_size: 4
       overlap: 0.5
       mode: gaussian
+     

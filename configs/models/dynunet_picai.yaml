@@ -74,6 +74,6 @@ init_args:
     class_path: monai.inferers.SlidingWindowInferer
     init_args:
       roi_size: [256, 256, 24]
-      sw_batch_size: 6
+      sw_batch_size: 4
       overlap: 0.5
       mode: gaussian
