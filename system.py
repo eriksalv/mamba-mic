@@ -8,6 +8,7 @@ from monai.metrics import (
 from monai.inferers import Inferer, SliceInferer
 from monai.transforms import Compose, Activations, AsDiscrete
 from monai.losses.dice import FocalLoss
+from data_modules.pi_caiv2 import PICAIV2DataModule
 
 
 class System(pl.LightningModule):
@@ -36,11 +37,7 @@ class System(pl.LightningModule):
             num_output_channels is not None and softmax is True
         ), "num_output_channels should only be set if softmax is True"
 
-        self.criterion = FocalLoss(
-            include_background=include_background,
-            gamma=1.0,
-            alpha=0.90
-        )
+        self.criterion = FocalLoss(include_background=include_background, gamma=2.0)
 
         self.metrics = {
             "dice": DiceMetric(
@@ -122,14 +119,21 @@ class System(pl.LightningModule):
 
         y_hat_binarized = self.post_pred(y_hat)
 
+        batch["image"] = batch["image"].squeeze(0)
+        batch["label"] = batch["label"].squeeze(0)
+        batch["pred"] = Activations(sigmoid=True, softmax=False)(y_hat).squeeze(0)
+
+        if (
+            isinstance(self.trainer.datamodule, PICAIV2DataModule)
+            and (self.current_epoch + 1) % (self.trainer.check_val_every_n_epoch * 5)
+            == 0
+        ):
+            self.trainer.datamodule.eval_picai(batch)
+
         if (
             self.trainer.state.fn in ["validate", "test", "predict"]
             and self.save_output
         ):
-            batch["image"] = batch["image"].squeeze(0)
-            batch["label"] = batch["label"].squeeze(0)
-            batch["pred"] = y_hat_binarized.squeeze(0)
-            # batch["softmax"] = Activations(sigmoid=True, softmax=False)(y_hat_binarized).squeeze(0)
             self.trainer.datamodule.invert_and_save(batch)
 
         for metric in self.metrics.values():
@@ -162,6 +166,14 @@ class System(pl.LightningModule):
 
                 metrics[f"{stage}_{name}"] = per_channel.mean()
                 metric.reset()
+
+        if (
+            isinstance(self.trainer.datamodule, PICAIV2DataModule)
+            and (self.current_epoch + 1) % (self.trainer.check_val_every_n_epoch * 5)
+            == 0
+        ):
+            picai_metrics = self.trainer.datamodule.eval_picai()
+            metrics |= picai_metrics
 
         self.log_dict(metrics, sync_dist=True)
 

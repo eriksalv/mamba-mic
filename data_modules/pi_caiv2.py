@@ -8,6 +8,8 @@ import torch
 import numpy as np
 from monai.data import ITKReader
 import SimpleITK as sitk
+from picai_eval import evaluate
+from report_guided_annotation import extract_lesion_candidates
 
 
 class PICAIV2DataModule(pl.LightningDataModule):
@@ -27,7 +29,7 @@ class PICAIV2DataModule(pl.LightningDataModule):
         cache_rate=0.0,
         preprocess=None,
         augment=None,
-        name="picaiv2"
+        name="picaiv2",
     ):
         super().__init__()
         self.image_dir = image_dir
@@ -43,6 +45,8 @@ class PICAIV2DataModule(pl.LightningDataModule):
         self.cache_rate = cache_rate
         self.filter_empty_labels_for_training = filter_empty_labels_for_training
         self.name = name
+        self.labels_to_evaluate = []
+        self.preds_to_evaluate = []
 
         default_preprocess = T.Compose(
             [
@@ -183,16 +187,17 @@ class PICAIV2DataModule(pl.LightningDataModule):
                 ),
                 T.SaveImaged(
                     keys="pred",
-                    output_dir=f"./data/pred/picaiv2/{self.name}",
-                    output_postfix='detection_map',
+                    output_dir=f"./data/picaiv2/{self.name}",
+                    output_postfix="detection_map",
                     separate_folder=False,
-                ), 
+                ),
                 T.SaveImaged(
                     keys="label",
-                    output_dir=f"./data/labels/picaiv2/{self.name}",
-                    output_postfix='label',
+                    output_dir=f"./data/picaiv2/{self.name}",
+                    output_postfix="label",
                     separate_folder=False,
-                )]
+                ),
+            ]
         )
 
         self.train_subjects = None
@@ -288,7 +293,7 @@ class PICAIV2DataModule(pl.LightningDataModule):
         if not self.include_empty_eval:
             val_subjects, _ = self.filter_empty_labels(val_subjects)
             test_subjects, _ = self.filter_empty_labels(test_subjects)
-        
+
         if self.filter_empty_labels_for_training:
             train_subjects, _ = self.filter_empty_labels(train_subjects)
 
@@ -335,7 +340,9 @@ class PICAIV2DataModule(pl.LightningDataModule):
         )
 
     def test_dataloader(self):
-        return DataLoader(self.test_set, batch_size=1)
+        return DataLoader(
+            self.test_set, batch_size=1, num_workers=self.num_workers, shuffle=False
+        )
 
     def filter_empty_labels(self, subjects):
         """Filter out subjects with labels filled with zeros using SimpleITK."""
@@ -356,6 +363,28 @@ class PICAIV2DataModule(pl.LightningDataModule):
                 non_empty_subjects.append(subject)
 
         return non_empty_subjects, empty_subjects
+
+    def picai_eval(self, batch=None):
+        if batch is not None:
+            label, pred = batch["label"].cpu().numpy(), batch["pred"].cpu().numpy()
+            self.labels_to_evaluate.append(label)
+            self.preds_to_evaluate.append(pred)
+            return
+
+        evaluation = evaluate(
+            y_true=self.labels_to_evaluate,
+            y_det=self.preds_to_evaluate,
+            y_det_postprocess_func=lambda pred: extract_lesion_candidates(pred)[0],
+        )
+
+        self.labels_to_evaluate = []
+        self.preds_to_evaluate = []
+
+        return {
+            "AP": evaluation.AP,
+            "AUROC": evaluation.auroc,
+            "Overall Score": evaluation.score,
+        }
 
 
 class ConvertToMultiChanneld(T.MapTransform):
