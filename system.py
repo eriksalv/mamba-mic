@@ -8,7 +8,9 @@ from monai.metrics import (
 from monai.inferers import Inferer, SliceInferer
 from monai.transforms import Compose, Activations, AsDiscrete
 from monai.losses.dice import FocalLoss
-from data_modules.pi_caiv2 import PICAIV2DataModule
+from picai_eval.eval import evaluate_case
+from report_guided_annotation import extract_lesion_candidates
+from data_modules.pi_caiv2 import PICAIV2DataModule, evaluate_cases
 
 
 class System(pl.LightningModule):
@@ -37,7 +39,9 @@ class System(pl.LightningModule):
             num_output_channels is not None and softmax is True
         ), "num_output_channels should only be set if softmax is True"
 
-        self.criterion = FocalLoss(include_background=include_background, gamma=2.0)
+        self.criterion = FocalLoss(
+            include_background=include_background, gamma=1.0, alpha=0.9
+        )
 
         self.metrics = {
             "dice": DiceMetric(
@@ -54,6 +58,7 @@ class System(pl.LightningModule):
                 reduction="mean_batch",
             ),
         }
+        self.extra_metrics = {"picai": []}
 
         self.post_pred = (
             Compose([AsDiscrete(argmax=True, dim=1, to_onehot=num_output_channels)])
@@ -123,12 +128,13 @@ class System(pl.LightningModule):
         batch["label"] = batch["label"].squeeze(0)
         batch["pred"] = Activations(sigmoid=True, softmax=False)(y_hat).squeeze(0)
 
-        if (
-            isinstance(self.trainer.datamodule, PICAIV2DataModule)
-            and (self.current_epoch + 1) % (self.trainer.check_val_every_n_epoch * 5)
-            == 0
-        ):
-            self.trainer.datamodule.eval_picai(batch)
+        if isinstance(self.trainer.datamodule, PICAIV2DataModule):
+            eval = evaluate_case(
+                y_true=batch["label"].squeeze().cpu().numpy(),
+                y_det=batch["pred"].squeeze().cpu().numpy(),
+                y_det_postprocess_func=lambda pred: extract_lesion_candidates(pred)[0],
+            )
+            self.extra_metrics["picai"].append(eval)
 
         if (
             self.trainer.state.fn in ["validate", "test", "predict"]
@@ -167,13 +173,9 @@ class System(pl.LightningModule):
                 metrics[f"{stage}_{name}"] = per_channel.mean()
                 metric.reset()
 
-        if (
-            isinstance(self.trainer.datamodule, PICAIV2DataModule)
-            and (self.current_epoch + 1) % (self.trainer.check_val_every_n_epoch * 5)
-            == 0
-        ):
-            picai_metrics = self.trainer.datamodule.eval_picai()
-            metrics |= picai_metrics
+        if isinstance(self.trainer.datamodule, PICAIV2DataModule):
+            metrics |= evaluate_cases(self.extra_metrics["picai"])
+            self.extra_metrics["picai"] = []
 
         self.log_dict(metrics, sync_dist=True)
 

@@ -8,8 +8,7 @@ import torch
 import numpy as np
 from monai.data import ITKReader
 import SimpleITK as sitk
-from picai_eval import evaluate
-from report_guided_annotation import extract_lesion_candidates
+from picai_eval import Metrics
 
 
 class PICAIV2DataModule(pl.LightningDataModule):
@@ -45,8 +44,6 @@ class PICAIV2DataModule(pl.LightningDataModule):
         self.cache_rate = cache_rate
         self.filter_empty_labels_for_training = filter_empty_labels_for_training
         self.name = name
-        self.labels_to_evaluate = []
-        self.preds_to_evaluate = []
 
         default_preprocess = T.Compose(
             [
@@ -364,27 +361,48 @@ class PICAIV2DataModule(pl.LightningDataModule):
 
         return non_empty_subjects, empty_subjects
 
-    def picai_eval(self, batch=None):
-        if batch is not None:
-            label, pred = batch["label"].cpu().numpy(), batch["pred"].cpu().numpy()
-            self.labels_to_evaluate.append(label)
-            self.preds_to_evaluate.append(pred)
-            return
 
-        evaluation = evaluate(
-            y_true=self.labels_to_evaluate,
-            y_det=self.preds_to_evaluate,
-            y_det_postprocess_func=lambda pred: extract_lesion_candidates(pred)[0],
-        )
+def evaluate_cases(cases, weight=1):
+    """
+    Custom picai eval function to basically run `picai_eval.evaluate` on
+    already generated case evaluations
 
-        self.labels_to_evaluate = []
-        self.preds_to_evaluate = []
+    https://github.com/DIAGNijmegen/picai_eval/blob/main/src/picai_eval/eval.py
+    """
+    case_target = {}
+    case_weight = {}
+    case_pred = {}
+    lesion_results = {}
+    lesion_weight = {}
 
-        return {
-            "AP": evaluation.AP,
-            "AUROC": evaluation.auroc,
-            "Overall Score": evaluation.score,
-        }
+    for idx, result in enumerate(cases):
+        lesion_results_case, case_confidence, _, _ = result
+
+        # aggregate results
+        case_weight[idx] = weight
+        case_pred[idx] = case_confidence
+        if len(lesion_results_case):
+            case_target[idx] = np.max([a[0] for a in lesion_results_case])
+        else:
+            case_target[idx] = 0
+
+        # accumulate outputs
+        lesion_results[idx] = lesion_results_case
+        lesion_weight[idx] = [weight] * len(lesion_results_case)
+
+    metrics = Metrics(
+        lesion_results=lesion_results,
+        case_target=case_target,
+        case_pred=case_pred,
+        case_weight=case_weight,
+        lesion_weight=lesion_weight,
+    )
+
+    return {
+        "AP": metrics.AP,
+        "AUROC": metrics.auroc,
+        "PICAI-Score": metrics.score,
+    }
 
 
 class ConvertToMultiChanneld(T.MapTransform):
