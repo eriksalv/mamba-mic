@@ -26,26 +26,30 @@ class OcelotDataModule(pl.LightningDataModule):
         self.num_workers = num_workers
         self.cache_rate = cache_rate
         self.name = name
-    
+
+        
+
         default_preprocess = T.Compose(
-                [
-                    T.LoadImaged(keys=["img_tissue", "img_cells", "label_tissues", "label_cropped_tissues"]),
-                    T.EnsureChannelFirstd(keys=["img_tissue", "img_cells", "label_tissues", "label_cropped_tissues"]), 
-                    T.NormalizeIntensityd(keys=["img_tissue", "img_cells"]),  # Normalize intensity
-                    T.ConcatItemsd(keys=["img_tissue", "img_cells"], name="image", dim=0),  # Stack images as multi-channel input
-                    T.ConcatItemsd(keys=["label_tissues", "label_cropped_tissues"], name="label", dim=0),  # Stack labels as multi-channel target
-                    T.ToTensord(keys=["image", "label"]),  # Convert to PyTorch tensors
-                ]
-            )
+            [
+                T.LoadImaged(keys=["img_tissue", "img_cells", "label_tissues", "label_cropped_tissues"]),
+                T.EnsureChannelFirstd(keys=["img_tissue", "img_cells", "label_tissues", "label_cropped_tissues"]), 
+                T.Lambdad(keys=["label_tissues"], func=standardize_label),
+                T.AsDiscreted(keys=["label_tissues"], to_onehot=2, threshold=0.5),
+                T.NormalizeIntensityd(keys=["img_tissue", "img_cells"]),  # Normalize intensity
+                T.ConcatItemsd(keys=["img_tissue", "img_cells"], name="image", dim=0),  # Stack images as multi-channel input
+                T.ConcatItemsd(keys=["label_tissues", "label_cropped_tissues"], name="label", dim=0),  # Stack labels as multi-channel target
+                T.ToTensord(keys=["image", "label"]),  # Convert to PyTorch tensors
+            ]
+        )
         self.preprocess = preprocess if preprocess is not None else default_preprocess
         self.augment = (
             augment
             if augment is not None
             else T.Compose(
                 [
-                T.RandZoomd(keys=["image", "label"], prob=0.7, min_zoom=0.9, max_zoom=1.1),  # Zoom with ±10% resizing
-                    T.RandCropByLabelClassesd(keys=["image", "label"], label_key="label", spatial_size=[896, 896], num_classes=4, 
-                                            num_samples=1, ratios=[1, 1, 1, 1]),  # Random crop to 896x896
+                    T.RandZoomd(keys=["image", "label"], prob=0.7, min_zoom=0.9, max_zoom=1.1),  # Zoom with ±10% resizing
+                    T.RandCropByLabelClassesd(keys=["image", "label"], label_key="label", spatial_size=[896, 896], num_classes=5, 
+                               num_samples=1, ratios=[1, 1, 1, 1,1]),  # Random crop to 896x896
                     T.RandFlipd(keys=["image", "label"], prob=0.7, spatial_axis=[0, 1]),  # Random flip (horizontal or vertical)
                     T.RandRotate90d(keys=["image", "label"], prob=0.7),  # Random rotation by 90°, 180°, or 270°
                     T.RandAdjustContrastd(keys=["image"], prob=0.7, gamma=(0.8, 1.2)),  # Random brightness and contrast adjustment
@@ -118,3 +122,13 @@ class OcelotDataModule(pl.LightningDataModule):
 
     def test_dataloader(self):
         return DataLoader(self.test_set, batch_size=1)
+
+def standardize_label(label):
+            """
+            Standardize label_tissues to be in [0, 1] range.
+            - If values are in [0, 255], normalize.
+            - If values are categorical (e.g., {0,1,2}), leave as is.
+            """
+            if label.max() > 1:  # If the label has intensity values 0-255, normalize
+                label = label / 255.0
+            return label  # Keep as is if already normalized or categorical
