@@ -20,3 +20,5 @@ jsonargparse==4.33.2
 timm
 fvcore
 SimpleITK
+picai_eval
+report_guided_annotation

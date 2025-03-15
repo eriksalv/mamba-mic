@@ -6,7 +6,6 @@ from glob import glob
 import os
 import torch
 import numpy as np
-from monai.data import ITKReader
 import SimpleITK as sitk
 from picai_eval import Metrics
 
@@ -309,7 +308,7 @@ class PICAIV2DataModule(pl.LightningDataModule):
             self.val_set = CacheDataset(
                 val_subjects,
                 transform=self.preprocess,
-                cache_rate=0.0,
+                cache_rate=self.cache_rate,
             )
 
         # Assign test dataset for use in dataloader(s)
@@ -317,7 +316,7 @@ class PICAIV2DataModule(pl.LightningDataModule):
             self.test_set = CacheDataset(
                 test_subjects,
                 transform=self.preprocess,
-                cache_rate=0.0,
+                cache_rate=self.cache_rate,
             )
 
     def train_dataloader(self):
@@ -362,7 +361,7 @@ class PICAIV2DataModule(pl.LightningDataModule):
         return non_empty_subjects, empty_subjects
 
 
-def evaluate_cases(cases, weight=1):
+def evaluate_cases(cases, weight=1) -> Metrics:
     """
     Custom picai eval function to basically run `picai_eval.evaluate` on
     already generated case evaluations
@@ -390,19 +389,13 @@ def evaluate_cases(cases, weight=1):
         lesion_results[idx] = lesion_results_case
         lesion_weight[idx] = [weight] * len(lesion_results_case)
 
-    metrics = Metrics(
+    return Metrics(
         lesion_results=lesion_results,
         case_target=case_target,
         case_pred=case_pred,
         case_weight=case_weight,
         lesion_weight=lesion_weight,
     )
-
-    return {
-        "AP": metrics.AP,
-        "AUROC": metrics.auroc,
-        "PICAI-Score": metrics.score,
-    }
 
 
 class ConvertToMultiChanneld(T.MapTransform):

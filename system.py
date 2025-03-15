@@ -10,7 +10,9 @@ from monai.transforms import Compose, Activations, AsDiscrete
 from monai.losses.dice import FocalLoss
 from picai_eval.eval import evaluate_case
 from report_guided_annotation import extract_lesion_candidates
+from torch.nn.modules.loss import _Loss
 from data_modules.pi_caiv2 import PICAIV2DataModule, evaluate_cases
+import wandb
 
 
 class System(pl.LightningModule):
@@ -18,6 +20,7 @@ class System(pl.LightningModule):
         self,
         net: torch.nn.Module,
         val_inferer: Inferer = None,
+        criterion: _Loss = None,
         lr=0.001,
         softmax=False,
         include_background=True,
@@ -39,8 +42,10 @@ class System(pl.LightningModule):
             num_output_channels is not None and softmax is True
         ), "num_output_channels should only be set if softmax is True"
 
-        self.criterion = FocalLoss(
-            include_background=include_background, gamma=1.0, alpha=0.9
+        self.criterion = (
+            criterion
+            if criterion
+            else FocalLoss(include_background=include_background, gamma=2)
         )
 
         self.metrics = {
@@ -91,7 +96,7 @@ class System(pl.LightningModule):
             )
             self.val_inferer = val_inferer
 
-        self.save_hyperparameters()
+        self.save_hyperparameters(ignore=["net"])
 
     def forward(self, x):
         return self.net(x)
@@ -174,8 +179,37 @@ class System(pl.LightningModule):
                 metric.reset()
 
         if isinstance(self.trainer.datamodule, PICAIV2DataModule):
-            metrics |= evaluate_cases(self.extra_metrics["picai"])
+            picai_metrics = evaluate_cases(self.extra_metrics["picai"])
+            metrics |= {
+                "AP": picai_metrics.AP,
+                "AUROC": picai_metrics.auroc,
+                "PICAI-Score": picai_metrics.score,
+            }
             self.extra_metrics["picai"] = []
+
+            roc_data = [
+                [fpr, tpr]
+                for (fpr, tpr) in zip(picai_metrics.case_FPR, picai_metrics.case_TPR)
+            ]
+            pr_data = [
+                [recall, precision]
+                for (recall, precision) in zip(
+                    picai_metrics.recall, picai_metrics.precision
+                )
+            ]
+            roc_table = wandb.Table(data=roc_data, columns=["FPR", "TPR"])
+            pr_table = wandb.Table(data=pr_data, columns=["Recall", "Precision"])
+
+            wandb.log(
+                {f"{stage}/ROC": wandb.plot.line(roc_table, "FPR", "TPR", title="ROC")}
+            )
+            wandb.log(
+                {
+                    f"{stage}/PR": wandb.plot.line(
+                        pr_table, "Recall", "Precision", title="PR"
+                    )
+                }
+            )
 
         self.log_dict(metrics, sync_dist=True)
 
