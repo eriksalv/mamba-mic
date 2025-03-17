@@ -1,6 +1,10 @@
 class_path: system.System
 init_args:
   include_background: true
+  criterion:
+    class_path: monai.losses.FocalLoss
+    init_args:
+      gamma: 1.0
   net:
     class_path: models.umamba.UMambaEnc
     init_args: 
@@ -48,7 +52,7 @@ init_args:
           - 2
         - - 2
           - 2
-          - 2
+          - 1
         - - 2
           - 2
           - 1
