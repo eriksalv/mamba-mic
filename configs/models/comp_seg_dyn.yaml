@@ -1,0 +1,112 @@
+class_path: system.System
+init_args:
+  include_background: true
+  is_ocelot: true
+  net:
+    class_path: models.comp_seg.CompositeSegmentationModel
+    init_args:
+      ts_net:
+        class_path: monai.networks.nets.dynunet.DynUNet
+        init_args:
+          spatial_dims: 2
+          in_channels: 3
+          out_channels: 2
+          kernel_size:
+            - - 3
+              - 3
+            - - 3
+              - 3
+            - - 3
+              - 3
+            - - 3
+              - 3
+            - - 3
+              - 3
+            - - 3
+              - 3
+            - - 3
+              - 3
+          strides:
+            - - 1
+              - 1
+            - - 2
+              - 2
+            - - 2
+              - 2
+            - - 2
+              - 2
+            - - 2
+              - 2
+            - - 2
+              - 2
+            - - 2
+              - 2
+          upsample_kernel_size:
+            - - 2
+              - 2
+            - - 2
+              - 2
+            - - 2
+              - 2
+            - - 2
+              - 2
+            - - 2
+              - 2
+            - - 2
+              - 2
+      cs_net:
+        class_path: monai.networks.nets.dynunet.DynUNet
+        init_args:
+          spatial_dims: 2
+          in_channels: 7
+          out_channels: 2
+          kernel_size:
+            - - 3
+              - 3
+            - - 3
+              - 3
+            - - 3
+              - 3
+            - - 3
+              - 3
+            - - 3
+              - 3
+            - - 3
+              - 3
+            - - 3
+              - 3
+          strides:
+            - - 1
+              - 1
+            - - 2
+              - 2
+            - - 2
+              - 2
+            - - 2
+              - 2
+            - - 2
+              - 2
+            - - 2
+              - 2
+            - - 2
+              - 2
+          upsample_kernel_size:
+            - - 2
+              - 2
+            - - 2
+              - 2
+            - - 2
+              - 2
+            - - 2
+              - 2
+            - - 2
+              - 2
+            - - 2
+              - 2
+  val_inferer:
+      class_path: monai.inferers.SlidingWindowInferer
+      init_args:
+        roi_size: [1024, 1024]
+        sw_batch_size: 4
+        overlap: 0.5
+        mode: gaussian

@@ -7,8 +7,8 @@ from monai.metrics import (
 )
 from monai.inferers import Inferer, SliceInferer
 from monai.transforms import Compose, Activations, AsDiscrete
-from monai.losses.dice import FocalLoss
-
+from monai.losses.dice import FocalLoss, DiceCELoss
+from ocelot_util import normalize_crop_coords_batch
 
 class System(pl.LightningModule):
     def __init__(
@@ -19,11 +19,14 @@ class System(pl.LightningModule):
         softmax=False,
         include_background=True,
         num_output_channels=None,
+        use_bce = False,
+        use_focal = True,
         do_slice_inference=False,
         slice_shape=None,
         slice_dim=None,
         slice_batch_size=None,
         save_output=False,
+        is_ocelot = False,
     ) -> None:
         super().__init__()
         self.net = net
@@ -31,16 +34,41 @@ class System(pl.LightningModule):
         self.softmax = softmax
         self.include_background = include_background
         self.save_output = save_output
+        self.use_bce = use_bce
+        self.use_focal = use_focal
+        self.is_ocelot = is_ocelot
 
         assert (num_output_channels is None and softmax is False) or (
             num_output_channels is not None and softmax is True
         ), "num_output_channels should only be set if softmax is True"
-
-        self.criterion = FocalLoss(
-            include_background=include_background,
-            gamma=1.0,
-            alpha=0.90
-        )
+        if self.use_focal:
+            self.criterion = FocalLoss(
+               include_background=include_background,
+               gamma=1.0,
+               alpha=0.90
+            )
+        else:
+            self.criterion = DiceCELoss(
+              include_background=include_background,
+              sigmoid=not softmax,
+              softmax=softmax,
+              squared_pred=True,
+            )
+        self.empty_criterion = torch.nn.BCEWithLogitsLoss()
+        
+        if self.is_ocelot:
+            self.tissue_criterion = DiceCELoss(
+              include_background=include_background,
+              sigmoid=not softmax,
+              softmax=softmax,
+              squared_pred=True,
+            )
+            self.cell_criterion = DiceCELoss(
+              include_background=include_background,
+              sigmoid=not softmax,
+              softmax=softmax,
+              squared_pred=True,
+            )
 
         self.metrics = {
             "dice": DiceMetric(
@@ -98,44 +126,110 @@ class System(pl.LightningModule):
         if isinstance(batch, list):
             batch = batch[0]
 
-        x, y = batch["image"], batch["label"]
+        if self.is_ocelot:
+            x_t, y_t = batch["img_tissue"],  batch["label_tissue"]
+            x_c, y_c = batch["img_cell"], batch["label_cropped_tissue"]
+            meta_batch = batch["meta"]
+        
+            cropped_coords = normalize_crop_coords_batch(meta_batch)
+            
+            if val:
+                return self.val_inferer(inputs=(x_t, x_c, cropped_coords), network=self.net), y_t, y_c
 
-        if self.do_slice_inference:
-            return self.slice_inferer(inputs=x, network=self.net), y
+            t_pred, c_pred = self.net.forward(x_t, x_c, cropped_coords, train_mode=True)
 
-        if val:
-            return self.val_inferer(inputs=x, network=self.net), y
+            return t_pred, c_pred, y_t, y_c
 
-        return self(x), y
+        else:
+            x, y = batch["image"], batch["label"]
+
+            if self.do_slice_inference:
+                return self.slice_inferer(inputs=x, network=self.net), y
+
+            if val:
+                return self.val_inferer(inputs=x, network=self.net), y
+
+            return self(x), y
 
     def training_step(self, batch, batch_idx):
-        y_hat, y = self.infer_batch(batch)
-        loss = self.criterion(y_hat, y)
+        if self.is_ocelot:
+            y_t_hat, y_c_hat, y_t, y_c = self.infer_batch(batch)
+            tissue_loss = self.tissue_criterion(y_t_hat, y_t)
+            cell_loss = self.cell_criterion(y_c_hat, y_c)
+            
+            total_loss = tissue_loss + cell_loss
+            self.log("train_loss", total_loss, prog_bar=True)
+            return total_loss
+        else:   
+            y_hat, y = self.infer_batch(batch)
+            if self.use_bce:
+                empty_labels_mask = torch.all(y == 0, dim=(1, 2, 3, 4))  # Shape: [batch_size]
 
-        self.log("train_loss", loss, prog_bar=True)
+                # Compute loss for non-empty labels
+                masked_y_hat = y_hat[~empty_labels_mask, ...]
+                masked_y = y[~empty_labels_mask, ...]
 
-        return loss
+                if masked_y_hat.numel() > 0 and masked_y.numel() > 0:
+                    non_empty_loss = self.criterion(masked_y_hat, masked_y)
+                else:
+                    non_empty_loss = torch.tensor(0.0, device=y_hat.device)
+
+                # Compute loss for empty labels (all zeros)
+                empty_masked_y_hat = y_hat[empty_labels_mask, ...]
+                empty_masked_y = y[empty_labels_mask, ...]
+
+                if empty_masked_y_hat.numel() > 0 and empty_masked_y.numel() > 0:
+                    empty_loss = self.empty_criterion(empty_masked_y_hat, empty_masked_y)
+                else:
+                    empty_loss = torch.tensor(0.0, device=y_hat.device)
+
+                # Total loss
+                loss = non_empty_loss + empty_loss
+            else:
+                loss = self.criterion(y_hat, y)
+
+            self.log("train_loss", loss, prog_bar=True)
+
+            return loss
 
     def _shared_eval_step(self, batch, batch_idx):
-        y_hat, y = self.infer_batch(batch, val=True)
-        loss = self.criterion(y_hat, y)
+        if self.is_ocelot:
+            y_t_hat, y_c_hat, y_t, y_c = self.infer_batch(batch)
+            tissue_loss = self.tissue_criterion(y_t_hat, y_t)
+            cell_loss = self.cell_criterion(y_c_hat, y_c)
+            
+            total_loss = tissue_loss + cell_loss
 
-        y_hat_binarized = self.post_pred(y_hat)
+            y_t_hat_binarized = self.post_pred(y_t_hat)
+            y_c_hat_binarized = self.post_pred(y_c_hat)
 
-        if (
-            self.trainer.state.fn in ["validate", "test", "predict"]
-            and self.save_output
-        ):
-            batch["image"] = batch["image"].squeeze(0)
-            batch["label"] = batch["label"].squeeze(0)
-            batch["pred"] = y_hat_binarized.squeeze(0)
-            # batch["softmax"] = Activations(sigmoid=True, softmax=False)(y_hat_binarized).squeeze(0)
-            self.trainer.datamodule.invert_and_save(batch)
+            for metric in self.metrics.values():
+                metric(y_t_hat_binarized, y_t)
+                metric(y_c_hat_binarized, y_c)
 
-        for metric in self.metrics.values():
-            metric(y_hat_binarized, y)
 
-        return loss
+            return total_loss
+
+        else:
+            y_hat, y = self.infer_batch(batch, val=True)
+            loss = self.criterion(y_hat, y)
+
+            y_hat_binarized = self.post_pred(y_hat)
+
+            if (
+                self.trainer.state.fn in ["validate", "test", "predict"]
+                and self.save_output
+            ):
+                batch["image"] = batch["image"].squeeze(0)
+                batch["label"] = batch["label"].squeeze(0)
+                batch["pred"] = y_hat_binarized.squeeze(0)
+                # batch["softmax"] = Activations(sigmoid=True, softmax=False)(y_hat_binarized).squeeze(0)
+                self.trainer.datamodule.invert_and_save(batch)
+
+            for metric in self.metrics.values():
+                metric(y_hat_binarized, y)
+
+            return loss
 
     def validation_step(self, batch, batch_idx):
         loss = self._shared_eval_step(batch, batch_idx)

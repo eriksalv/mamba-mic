@@ -6,6 +6,7 @@ from glob import glob
 import os
 import torch
 import numpy as np
+import json
 
 class OcelotDataModule(pl.LightningDataModule):
     def __init__(
@@ -13,6 +14,7 @@ class OcelotDataModule(pl.LightningDataModule):
         batch_size: int,
         image_dir="/cluster/projects/vc/data/mic/open/OCELOT/ocelot_data/images",
         label_dir="/cluster/projects/vc/data/mic/open/OCELOT/ocelot_data/annotations",
+        metadata_path="/cluster/projects/vc/data/mic/open/OCELOT/ocelot_data/metadata.json",
         num_workers=4,
         cache_rate=0.0,
         preprocess=None,
@@ -26,38 +28,38 @@ class OcelotDataModule(pl.LightningDataModule):
         self.num_workers = num_workers
         self.cache_rate = cache_rate
         self.name = name
+        self.metadata = load_metadata(metadata_path)
 
         
-
+      
         default_preprocess = T.Compose(
-            [
-                T.LoadImaged(keys=["img_tissue", "img_cells", "label_tissues", "label_cropped_tissues"]),
-                T.EnsureChannelFirstd(keys=["img_tissue", "img_cells", "label_tissues", "label_cropped_tissues"]), 
-                T.Lambdad(keys=["label_tissues"], func=standardize_label),
-                T.AsDiscreted(keys=["label_tissues"], to_onehot=2, threshold=0.5),
-                T.NormalizeIntensityd(keys=["img_tissue", "img_cells"]),  # Normalize intensity
-                T.ConcatItemsd(keys=["img_tissue", "img_cells"], name="image", dim=0),  # Stack images as multi-channel input
-                T.ConcatItemsd(keys=["label_tissues", "label_cropped_tissues"], name="label", dim=0),  # Stack labels as multi-channel target
-                T.ToTensord(keys=["image", "label"]),  # Convert to PyTorch tensors
-            ]
-        )
+                [
+                    T.LoadImaged(keys=["img_tissue", "img_cell", "label_tissue", "label_cropped_tissue"]),
+                    T.EnsureChannelFirstd(keys=["img_tissue", "img_cell", "label_tissue", "label_cropped_tissue"]), 
+                    T.Lambdad(keys=["label_tissue"], func=standardize_label),
+                    T.AsDiscreted(keys=["label_tissue"], to_onehot=2, threshold=0.5),
+                    T.Lambdad(keys=["label_cropped_tissue"], func=lambda x: x[:-1]),  # Remove last channel
+                    T.NormalizeIntensityd(keys=["img_tissue", "img_cell"]),  # Normalize intensity
+                    T.ToTensord(keys=["img_tissue", "img_cell", "label_tissue", "label_cropped_tissue"]),  # Convert to PyTorch tensors
+                ]
+            )
+       
         self.preprocess = preprocess if preprocess is not None else default_preprocess
+
+        
         self.augment = (
             augment
             if augment is not None
-            else T.Compose(
-                [
-                    T.RandZoomd(keys=["image", "label"], prob=0.7, min_zoom=0.9, max_zoom=1.1),  # Zoom with ±10% resizing
-                    T.RandCropByLabelClassesd(keys=["image", "label"], label_key="label", spatial_size=[896, 896], num_classes=5, 
-                               num_samples=1, ratios=[1, 1, 1, 1,1]),  # Random crop to 896x896
-                    T.RandFlipd(keys=["image", "label"], prob=0.7, spatial_axis=[0, 1]),  # Random flip (horizontal or vertical)
-                    T.RandRotate90d(keys=["image", "label"], prob=0.7),  # Random rotation by 90°, 180°, or 270°
-                    T.RandAdjustContrastd(keys=["image"], prob=0.7, gamma=(0.8, 1.2)),  # Random brightness and contrast adjustment
-                ]
-            )
+            else T.Compose([
+                    T.RandAdjustContrastd(keys=["img_tissue", "img_cell",], prob=0.7, gamma=(0.8, 1.2)),  # Random brightness and contrast adjustment
+                ])
         )
 
-    def collect_pairs(self, split):
+    
+    def collect_pairs_with_metadata(self, split):
+        """
+        Collects image-label pairs and retrieves metadata for tissue-cell alignment.
+        """
         img_tissues = sorted(glob(os.path.join(self.image_dir, split, "tissue", "*.jpg")))
         img_cells = sorted(glob(os.path.join(self.image_dir, split, "cell", "*.jpg")))
         
@@ -66,16 +68,29 @@ class OcelotDataModule(pl.LightningDataModule):
         label_cell_masks = sorted(glob(os.path.join(self.label_dir, split, "cell_mask_images", "*.png")))
         label_cells = sorted(glob(os.path.join(self.label_dir, split, "cell", "*.csv")))
 
-        return [{"img_tissue": i_t, "img_cells": i_c, 
-                "label_tissues": l_t, "label_cropped_tissues": l_ct,
-                "label_cell_masks": l_cm, "label_cells": l_c}
-                for i_t, i_c, l_t, l_ct, l_cm, l_c in zip(img_tissues, img_cells, label_tissues, label_cropped_tissues, label_cell_masks, label_cells)] 
+        # Extract metadata per sample
+        pairs = []
+        for i_t, i_c, l_t, l_ct, l_cm, l_c in zip(img_tissues, img_cells, label_tissues, label_cropped_tissues, label_cell_masks, label_cells):
+            sample_id = os.path.basename(i_t).split(".")[0]  # Extract sample ID from filename
+            if sample_id in self.metadata:
+                meta = self.metadata[sample_id]
+                pairs.append({
+                    "img_tissue": i_t,
+                    "img_cell": i_c, 
+                    "label_tissue": l_t,
+                    "label_cropped_tissue": l_ct,
+                    "label_cell_mask": l_cm,
+                    "label_cell": l_c,
+                    "meta": meta  # Attach metadata for cropping & alignment
+                })
+
+        return pairs
 
     def prepare_data(self):
         directiories = ['train', 'val', 'test']
-        self.train_files = self.collect_pairs('train')
-        self.val_files = self.collect_pairs('val')
-        self.test_files = self.collect_pairs('test')  
+        self.train_files = self.collect_pairs_with_metadata('train')
+        self.val_files = self.collect_pairs_with_metadata('val')
+        self.test_files = self.collect_pairs_with_metadata('test')  
 
         print(f"Train: {len(self.train_files)} | Val: {len(self.val_files)} | Test: {len(self.test_files)}")
    
@@ -124,11 +139,53 @@ class OcelotDataModule(pl.LightningDataModule):
         return DataLoader(self.test_set, batch_size=1)
 
 def standardize_label(label):
-            """
-            Standardize label_tissues to be in [0, 1] range.
-            - If values are in [0, 255], normalize.
-            - If values are categorical (e.g., {0,1,2}), leave as is.
-            """
-            if label.max() > 1:  # If the label has intensity values 0-255, normalize
-                label = label / 255.0
-            return label  # Keep as is if already normalized or categorical
+    """
+    Standardize `label_tissues`:
+    - Normalize values from [0, 255] to [0, 1] only for valid labels.
+    - Convert unknown label (255) to 0 (background).
+    """
+    label = label.astype(np.float32)  # Ensure correct data type
+
+    # Set unknown pixels (255) to background (0)
+    label[label == 255] = 0
+
+    # Normalize if max value is greater than 1
+    if label.max() > 1:
+        label = label / label.max()  # Normalize to [0,1]
+    
+    return label
+
+def load_metadata(metadata_path):
+    """
+    Load metadata.json and return a dictionary mapping sample IDs to metadata.
+    """
+    with open(metadata_path, "r") as f:
+        metadata = json.load(f)
+    
+    sample_pairs = metadata["sample_pairs"]
+    
+    metadata_dict = {}
+    for sample_id, data in sample_pairs.items():
+        metadata_dict[sample_id] = {
+            "slide_name": data["slide_name"],
+            "cell_patch": {
+                "x_start": data["cell"]["x_start"],
+                "y_start": data["cell"]["y_start"],
+                "x_end": data["cell"]["x_end"],
+                "y_end": data["cell"]["y_end"],
+                "resized_mpp_x": data["cell"]["resized_mpp_x"],
+                "resized_mpp_y": data["cell"]["resized_mpp_y"],
+            },
+            "tissue_patch": {
+                "x_start": data["tissue"]["x_start"],
+                "y_start": data["tissue"]["y_start"],
+                "x_end": data["tissue"]["x_end"],
+                "y_end": data["tissue"]["y_end"],
+                "resized_mpp_x": data["tissue"]["resized_mpp_x"],
+                "resized_mpp_y": data["tissue"]["resized_mpp_y"],
+            },
+            "organ": data["organ"],
+            "subset": data["subset"],
+        }
+    
+    return metadata_dict
