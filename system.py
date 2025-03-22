@@ -69,6 +69,33 @@ class System(pl.LightningModule):
               softmax=softmax,
               squared_pred=True,
             )
+            self.tissue_metrics = {
+                "dice": DiceMetric(include_background=include_background, reduction="mean_batch"),
+                "hd95": HausdorffDistanceMetric(
+                    include_background=include_background,
+                    distance_metric="euclidean",
+                    percentile=95,
+                    reduction="mean_batch",
+                ),
+                "confusion_matrix": ConfusionMatrixMetric(
+                    metric_name=["accuracy", "precision", "sensitivity", "f1 score"],
+                    reduction="mean_batch",
+                ),
+            }
+
+            self.cell_metrics = {
+                "dice": DiceMetric(include_background=include_background, reduction="mean_batch"),
+                "hd95": HausdorffDistanceMetric(
+                    include_background=include_background,
+                    distance_metric="euclidean",
+                    percentile=95,
+                    reduction="mean_batch",
+                ),
+                "confusion_matrix": ConfusionMatrixMetric(
+                    metric_name=["accuracy", "precision", "sensitivity", "f1 score"],
+                    reduction="mean_batch",
+                ),
+            }
 
         self.metrics = {
             "dice": DiceMetric(
@@ -127,16 +154,16 @@ class System(pl.LightningModule):
             batch = batch[0]
 
         if self.is_ocelot:
-            x_t, y_t = batch["img_tissue"],  batch["label_tissue"]
-            x_c, y_c = batch["img_cell"], batch["label_cropped_tissue"]
+            y_t = batch["label_tissue"]
+            y_c = batch["label_cropped_tissue"]
             meta_batch = batch["meta"]
         
             cropped_coords = normalize_crop_coords_batch(meta_batch)
             
             if val:
-                return self.val_inferer(inputs=(x_t, x_c, cropped_coords), network=self.net), y_t, y_c
+                return self.val_inferer(inputs=(batch, self.trainer.datamodule, cropped_coords), network=self.net), y_t, y_c
 
-            t_pred, c_pred = self.net.forward(x_t, x_c, cropped_coords, train_mode=True)
+            t_pred, c_pred = self.net.forward(batch, self.trainer.datamodule, cropped_coords, train_mode=False)
 
             return t_pred, c_pred, y_t, y_c
 
@@ -158,7 +185,9 @@ class System(pl.LightningModule):
             cell_loss = self.cell_criterion(y_c_hat, y_c)
             
             total_loss = tissue_loss + cell_loss
-            self.log("train_loss", total_loss, prog_bar=True)
+            self.log("train_cell_loss", cell_loss, prog_bar=True)
+            self.log("train_tissue_loss", tissue_loss, prog_bar=True)
+
             return total_loss
         else:   
             y_hat, y = self.infer_batch(batch)
@@ -193,6 +222,7 @@ class System(pl.LightningModule):
             return loss
 
     def _shared_eval_step(self, batch, batch_idx):
+
         if self.is_ocelot:
             y_t_hat, y_c_hat, y_t, y_c = self.infer_batch(batch)
             tissue_loss = self.tissue_criterion(y_t_hat, y_t)
@@ -203,12 +233,14 @@ class System(pl.LightningModule):
             y_t_hat_binarized = self.post_pred(y_t_hat)
             y_c_hat_binarized = self.post_pred(y_c_hat)
 
-            for metric in self.metrics.values():
+            for name, metric in self.tissue_metrics.items():
                 metric(y_t_hat_binarized, y_t)
+
+            # Compute cell metrics
+            for name, metric in self.cell_metrics.items():
                 metric(y_c_hat_binarized, y_c)
 
-
-            return total_loss
+            return total_loss, tissue_loss, cell_loss
 
         else:
             y_hat, y = self.infer_batch(batch, val=True)
@@ -232,9 +264,16 @@ class System(pl.LightningModule):
             return loss
 
     def validation_step(self, batch, batch_idx):
-        loss = self._shared_eval_step(batch, batch_idx)
-        self.log("val_loss", loss, sync_dist=True)
-        return {"val_loss": loss}
+        if self.is_ocelot:
+            loss, tissue_loss, cell_loss = self._shared_eval_step(batch, batch_idx)
+            self.log("val_loss", loss, sync_dist=True)
+            self.log("val_tissue_loss", tissue_loss, sync_dist=True)
+            self.log("val_cell_loss", cell_loss, sync_dist=True)
+            return {"val_loss": loss}
+        else:
+            loss = self._shared_eval_step(batch, batch_idx)
+            self.log("val_loss", loss, sync_dist=True)
+            return {"val_loss": loss}
 
     def test_step(self, batch, batch_idx):
         loss = self._shared_eval_step(batch, batch_idx)
@@ -243,19 +282,50 @@ class System(pl.LightningModule):
 
     def _shared_on_epoch_end(self, stage="val"):
         metrics = {}
-        for name, metric in self.metrics.items():
-            per_channel = metric.aggregate()
 
-            if name == "confusion_matrix":
-                for conf_name, conf_metric in zip(metric.metric_name, per_channel):
-                    metrics[f"{stage}_{conf_name}"] = conf_metric.mean()
+        if self.is_ocelot:
+            for name, metric in self.tissue_metrics.items():
+                per_channel = metric.aggregate()
+
+                if name == "confusion_matrix":
+                    for conf_name, conf_metric in zip(metric.metric_name, per_channel):
+                        metrics[f"{stage}_tissue_{conf_name}"] = conf_metric.mean()
+                        metric.reset()
+                else:
+                    for i in range(len(per_channel)):
+                        metrics[f"tissue_channel{i}/{stage}_{name}"] = per_channel[i]
+
+                    metrics[f"{stage}_tissue_{name}"] = per_channel.mean()
                     metric.reset()
-            else:
-                for i in range(len(per_channel)):
-                    metrics[f"channel{i}/{stage}_{name}"] = per_channel[i]
 
-                metrics[f"{stage}_{name}"] = per_channel.mean()
-                metric.reset()
+           
+            for name, metric in self.cell_metrics.items():
+                per_channel = metric.aggregate()
+
+                if name == "confusion_matrix":
+                    for conf_name, conf_metric in zip(metric.metric_name, per_channel):
+                        metrics[f"{stage}_cell_{conf_name}"] = conf_metric.mean()
+                        metric.reset()
+                else:
+                    for i in range(len(per_channel)):
+                        metrics[f"cell_channel{i}/{stage}_{name}"] = per_channel[i]
+                    metrics[f"{stage}_cell_{name}"] = per_channel.mean()
+                    metric.reset()
+        else:
+
+            for name, metric in self.metrics.items():
+                per_channel = metric.aggregate()
+
+                if name == "confusion_matrix":
+                    for conf_name, conf_metric in zip(metric.metric_name, per_channel):
+                        metrics[f"{stage}_{conf_name}"] = conf_metric.mean()
+                        metric.reset()
+                else:
+                    for i in range(len(per_channel)):
+                        metrics[f"channel{i}/{stage}_{name}"] = per_channel[i]
+
+                    metrics[f"{stage}_{name}"] = per_channel.mean()
+                    metric.reset()
 
         self.log_dict(metrics, sync_dist=True)
 

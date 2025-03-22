@@ -7,6 +7,8 @@ import os
 import torch
 import numpy as np
 import json
+from PIL import Image, ImageOps
+from monai.data import MetaTensor
 
 class OcelotDataModule(pl.LightningDataModule):
     def __init__(
@@ -33,16 +35,21 @@ class OcelotDataModule(pl.LightningDataModule):
         
       
         default_preprocess = T.Compose(
-                [
-                    T.LoadImaged(keys=["img_tissue", "img_cell", "label_tissue", "label_cropped_tissue"]),
-                    T.EnsureChannelFirstd(keys=["img_tissue", "img_cell", "label_tissue", "label_cropped_tissue"]), 
-                    T.Lambdad(keys=["label_tissue"], func=standardize_label),
-                    T.AsDiscreted(keys=["label_tissue"], to_onehot=2, threshold=0.5),
-                    T.Lambdad(keys=["label_cropped_tissue"], func=lambda x: x[:-1]),  # Remove last channel
-                    T.NormalizeIntensityd(keys=["img_tissue", "img_cell"]),  # Normalize intensity
-                    T.ToTensord(keys=["img_tissue", "img_cell", "label_tissue", "label_cropped_tissue"]),  # Convert to PyTorch tensors
-                ]
-            )
+            [  
+                # Correct the orientation of images once they are loaded
+                CorrectOrientationd(
+                keys=["img_tissue", "img_cell", "label_tissue", "label_cropped_tissue", "label_cell_mask"],
+                label_keys=["label_tissue" ]  # Labels should stay grayscale
+            ),
+                T.Lambdad(keys=["label_tissue"], func=onehot_tissue_label),
+                T.Lambdad(
+                    keys=["label_tissue", "label_cropped_tissue", "label_cell_mask"],
+                    func=exclude_bg,
+                ),
+                T.NormalizeIntensityd(keys=["img_tissue", "img_cell"]),  # Normalize intensity
+                T.ToTensord(keys=["img_tissue", "img_cell", "label_tissue", "label_cropped_tissue", "label_cell_mask"])
+            ]
+        )
        
         self.preprocess = preprocess if preprocess is not None else default_preprocess
 
@@ -50,12 +57,75 @@ class OcelotDataModule(pl.LightningDataModule):
         self.augment = (
             augment
             if augment is not None
-            else T.Compose([
-                    T.RandAdjustContrastd(keys=["img_tissue", "img_cell",], prob=0.7, gamma=(0.8, 1.2)),  # Random brightness and contrast adjustment
-                ])
+            else T.Compose(
+                        [
+                            #T.RandZoomd(
+                            #    keys=["img_tissue", "img_cell", "label_tissue", "label_cropped_tissue"], prob=0.7, min_zoom=0.9, max_zoom=1.1
+                            #),  
+                            #T.RandFlipd(
+                            #    keys=["img_tissue", "img_cell", "label_tissue", "label_cropped_tissue"], prob=1, spatial_axis=[0, 1]
+                            #),  # Random flip (horizontal or vertical)
+                            #T.RandRotate90d(
+                            #    keys=["img_tissue", "img_cell", "label_tissue", "label_cropped_tissue"], prob=1
+                            #),  # Random rotation by 90°, 180°, or 270°
+                            T.RandAdjustContrastd(
+                                keys=["img_tissue", "img_cell"], prob=0.7, gamma=(0.8, 1.2)
+                            ),  # Random brightness and contrast adjustment
+                        ]
+                    )
         )
 
+    def invert_tissue_pred(self, batch, parallelized=False):
+        transform = T.Invertd(
+            keys="pred_tissue",
+            transform=self.train_set.transform,  
+            orig_keys="label_tissue",  
+            meta_keys="pred_tissue_meta_dict",
+            orig_meta_keys="img_tissue_meta_dict",
+            meta_key_postfix="meta_dict",
+            nearest_interp=False,
+            to_tensor=True,
+            device="cpu",
+        )
+        tissue_pred_to_crop_list = []
+        batch["pred_tissue"] = MetaTensor(batch["pred_tissue"])
+        
+        if parallelized:
+            batch_inverter = T.BatchInverseTransform(self.train_set.transform, self.train_dataloader())
+            segs_dict = {"pred_tissue": batch["pred_tissue"]}
+            
+            with T.allow_missing_keys_mode(self.train_set.transform):
+                inverted_batch = batch_inverter(segs_dict)
+                tissue_pred_to_crop_list  = [entry['pred_tissue'] for entry in inverted_batch]
+        else:
+            # Loop through the batch and apply the transform to each row (each entry in batch)
+            for i in range(len(batch["pred_tissue"])):
+                # Create a copy of the batch to prevent modifying the original during inversion
+                batch_copy = batch.copy()
+                batch_copy["pred_tissue"] = batch["pred_tissue"][i]  
+                batch_copy["label_tissue"] = batch["label_tissue"][i]  
+                batch_copy["img_tissue"] = batch["img_tissue"][i]
+                    
+                
+                inverted_entry = transform(batch_copy)
+                tissue_pred_to_crop_list.append(inverted_entry["pred_tissue"])
+        
+        # After inversion: store the results back in the batch
+        batch['pred_tissue'] = tissue_pred_to_crop_list
     
+        return batch
+    
+     
+        
+    def reapply_augmentations(self, batch):
+        transform = T.ResampleToMatchd(
+            keys ='tissue_crop_resized',
+            key_dst = 'label_cropped_tissue',
+            mode = 'bilinear'
+        )
+        aligned_crop = transform(batch)
+        return aligned_crop
+
     def collect_pairs_with_metadata(self, split):
         """
         Collects image-label pairs and retrieves metadata for tissue-cell alignment.
@@ -113,8 +183,8 @@ class OcelotDataModule(pl.LightningDataModule):
 
         # Assign test dataset for use in dataloader(s)
         if stage == "test" or stage is None:
-            self.test_files = CacheDataset(
-                test_subjects,
+            self.test_set = CacheDataset(
+                self.test_files,
                 transform=self.preprocess,
                 cache_rate=0.0,
             )
@@ -189,3 +259,82 @@ def load_metadata(metadata_path):
         }
     
     return metadata_dict
+
+def standardize_label(label):
+    """
+    Standardize label_tissues to be in [0, 1] range.
+    - If values are in [0, 255], normalize.
+    - If values are categorical (e.g., {0,1,2}), leave as is.
+    """
+    if label.max() > 1:  # If the label has intensity values 0-255, normalize
+        label = label / 255.0
+    return label  # Keep as is if already normalized or categorical
+
+
+def onehot_tissue_label(label):
+
+    label[label > 2] = 3
+    return T.AsDiscrete(to_onehot=3)(label - 1)
+
+
+def exclude_bg(label):
+    return label[1].unsqueeze(0)
+
+class CorrectOrientationd(T.MapTransform):
+    def __init__(self, keys, label_keys=None, allow_missing_keys=True):
+        super().__init__(keys, allow_missing_keys)
+        self.keys = keys
+        self.label_keys = label_keys if label_keys else []  # Keys for labels that should remain grayscale
+        self.load_image = T.LoadImaged(keys=self.keys, allow_missing_keys=True, ensure_channel_first=True)
+    def inverse(self, data):
+        """ Prevent inversion by returning data unchanged. """
+        return data
+
+    def __call__(self, data):
+        loaded_data = self.load_image(data)
+
+        for key in self.keys:
+            if isinstance(data[key], torch.Tensor):
+                # Already processed, skip conversion
+                continue
+
+            
+            img = Image.open(data[key])
+            if isinstance(img, Image.Image):  
+                if hasattr(img, '_getexif'):
+                    exif = img._getexif()
+                    if exif is not None:
+                        orientation = exif.get(274)  # EXIF tag for orientation
+                        if orientation == 3:
+                            img = img.rotate(180, expand=True)
+                        elif orientation == 6:
+                            img = img.rotate(270, expand=True)
+                        elif orientation == 8:
+                            img = img.rotate(90, expand=True)
+                # Convert based on whether it's an image or label
+                if key in self.label_keys:
+                    img = img.convert("L") 
+                else:
+                    img = img.convert("RGB")  
+
+                img = np.array(img)
+
+                if key in self.label_keys:
+                    img = torch.tensor(img).unsqueeze(0)  # Shape: (1, H, W)
+                else:
+                    img = torch.tensor(img).permute(2, 0, 1)  # Shape: (3, H, W)
+                
+                img_meta_tensor = MetaTensor(
+                    img, 
+                    affine=torch.eye(4),  # Default identity affine matrix
+                    meta={"original_size": img.shape[:2], "orientation_fixed": True}
+                )
+                
+
+                data[key] = img_meta_tensor
+
+                # Ensure metadata tracking
+                data[f"{key}_meta_dict"] = img_meta_tensor.meta
+
+        return data
+               
