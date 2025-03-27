@@ -2,16 +2,18 @@ class_path: system.System
 init_args:
   include_background: true
   criterion:
-    class_path: monai.losses.FocalLoss
+    class_path: monai.losses.DiceFocalLoss
     init_args:
+      softmax: true
       gamma: 1.0
+      squared_pred: true
   net:
     class_path: models.umamba.UMambaEnc
     init_args: 
       input_size: [256, 256, 24]
       input_channels: 3
       n_stages: 7
-      features_per_stage: [32, 64, 128, 256, 320, 320, 320]
+      features_per_stage: [16, 32, 64, 128, 256, 512, 512]
       kernel_sizes:
         - - 3
           - 3

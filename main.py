@@ -1,5 +1,7 @@
 from lightning.pytorch.cli import LightningCLI
 from lightning.pytorch import seed_everything
+from lightning.pytorch.cli import SaveConfigCallback
+import lightning.pytorch as pl
 import wandb
 import logging
 import torch
@@ -7,8 +9,10 @@ import torch
 
 class MyLightningCLI(LightningCLI):
     def add_arguments_to_parser(self, parser):
-        parser.add_argument("--wandb.project", default="monai-runs")
-        parser.add_argument("--wandb.name")
+        parser.add_argument("--wandb.project", required=True)
+        parser.add_argument("--wandb.name", required=True)
+        parser.add_argument("--wandb.notes", required=False)
+        parser.add_argument("--wandb.watch_model", default=False)
 
         parser.link_arguments("wandb.name", "data.init_args.name")
 
@@ -19,8 +23,10 @@ class MyLightningCLI(LightningCLI):
             config=self.config_dump,
             project=wandb_config["project"],
             name=wandb_config["name"],
+            notes=wandb_config["notes"],
         )
-        wandb.watch(self.model, log_freq=100)
+        if wandb_config["watch_model"]:
+            wandb.watch(self.model, log_freq=100)
 
     def before_test(self):
         wandb_config = self.config_dump["wandb"]
@@ -32,13 +38,29 @@ class MyLightningCLI(LightningCLI):
         )
 
 
+class MySaveConfigCallback(SaveConfigCallback):
+    def save_config(
+        self, trainer: pl.Trainer, pl_module: pl.LightningModule, stage: str
+    ) -> None:
+        self.parser.save(
+            self.config,
+            "run_config.yaml",
+            skip_none=False,
+            overwrite=True,
+            multifile=False,
+        )
+        wandb.save("run_config.yaml", policy="now")
+
+
 def cli_main():
     cli = MyLightningCLI(
         parser_kwargs={
             "fit": {"default_config_files": ["configs/default.yaml"]},
+            "validate": {"default_config_files": ["configs/default_eval.yaml"]},
             "test": {"default_config_files": ["configs/default_eval.yaml"]},
         },
-        save_config_kwargs={"config_filename": "run_config.yaml", "overwrite": "true"},
+        save_config_callback=MySaveConfigCallback,
+        save_config_kwargs={"overwrite": "true"},
     )
 
 

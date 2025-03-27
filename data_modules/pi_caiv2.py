@@ -302,7 +302,13 @@ class PICAIV2DataModule(pl.LightningDataModule):
         if stage == "fit" or stage is None:
             self.train_set = CacheDataset(
                 train_subjects,
-                transform=T.Compose([self.preprocess, self.augment]),
+                transform=T.Compose(
+                    [
+                        self.preprocess,
+                        T.EnsureTyped(keys=["image", "label"], track_meta=False),
+                        self.augment,
+                    ]
+                ),
                 cache_rate=self.cache_rate,
             )
             self.val_set = CacheDataset(

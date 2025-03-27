@@ -59,7 +59,7 @@ class System(pl.LightningModule):
                 reduction="mean_batch",
             ),
             "confusion_matrix": ConfusionMatrixMetric(
-                metric_name=["accuracy", "precision", "sensitivity", "f1 score"],
+                metric_name=["precision", "sensitivity", "f1 score"],
                 reduction="mean_batch",
             ),
         }
@@ -104,7 +104,7 @@ class System(pl.LightningModule):
     def infer_batch(self, batch, val=False):
         if isinstance(batch, list):
             batch = batch[0]
-
+            
         x, y = batch["image"], batch["label"]
 
         if self.do_slice_inference:
@@ -117,6 +117,7 @@ class System(pl.LightningModule):
 
     def training_step(self, batch, batch_idx):
         y_hat, y = self.infer_batch(batch)
+        
         loss = self.criterion(y_hat, y)
 
         self.log("train_loss", loss, prog_bar=True)
@@ -125,6 +126,7 @@ class System(pl.LightningModule):
 
     def _shared_eval_step(self, batch, batch_idx):
         y_hat, y = self.infer_batch(batch, val=True)
+
         loss = self.criterion(y_hat, y)
 
         y_hat_binarized = self.post_pred(y_hat)
@@ -134,12 +136,12 @@ class System(pl.LightningModule):
         batch["pred"] = Activations(sigmoid=True, softmax=False)(y_hat).squeeze(0)
 
         if isinstance(self.trainer.datamodule, PICAIV2DataModule):
-            eval = evaluate_case(
+            _eval = evaluate_case(
                 y_true=batch["label"].squeeze().cpu().numpy(),
                 y_det=batch["pred"].squeeze().cpu().numpy(),
                 y_det_postprocess_func=lambda pred: extract_lesion_candidates(pred)[0],
             )
-            self.extra_metrics["picai"].append(eval)
+            self.extra_metrics["picai"].append(_eval)
 
         if (
             self.trainer.state.fn in ["validate", "test", "predict"]
@@ -179,37 +181,7 @@ class System(pl.LightningModule):
                 metric.reset()
 
         if isinstance(self.trainer.datamodule, PICAIV2DataModule):
-            picai_metrics = evaluate_cases(self.extra_metrics["picai"])
-            metrics |= {
-                "AP": picai_metrics.AP,
-                "AUROC": picai_metrics.auroc,
-                "PICAI-Score": picai_metrics.score,
-            }
-            self.extra_metrics["picai"] = []
-
-            roc_data = [
-                [fpr, tpr]
-                for (fpr, tpr) in zip(picai_metrics.case_FPR, picai_metrics.case_TPR)
-            ]
-            pr_data = [
-                [recall, precision]
-                for (recall, precision) in zip(
-                    picai_metrics.recall, picai_metrics.precision
-                )
-            ]
-            roc_table = wandb.Table(data=roc_data, columns=["FPR", "TPR"])
-            pr_table = wandb.Table(data=pr_data, columns=["Recall", "Precision"])
-
-            wandb.log(
-                {f"{stage}/ROC": wandb.plot.line(roc_table, "FPR", "TPR", title="ROC")}
-            )
-            wandb.log(
-                {
-                    f"{stage}/PR": wandb.plot.line(
-                        pr_table, "Recall", "Precision", title="PR"
-                    )
-                }
-            )
+            metrics |= self.log_picai_metrics(stage)
 
         self.log_dict(metrics, sync_dist=True)
 
@@ -222,3 +194,37 @@ class System(pl.LightningModule):
     def configure_optimizers(self):
         optimizer = torch.optim.AdamW(self.parameters(), lr=self.lr)
         return optimizer
+    
+    def log_picai_metrics(self, stage):
+        picai_metrics = evaluate_cases(self.extra_metrics["picai"])
+        self.extra_metrics["picai"] = []
+
+        roc_data = [
+            [fpr, tpr]
+            for (fpr, tpr) in zip(picai_metrics.case_FPR, picai_metrics.case_TPR)
+        ]
+        pr_data = [
+            [recall, precision]
+            for (recall, precision) in zip(
+                picai_metrics.recall, picai_metrics.precision
+            )
+        ]
+        roc_table = wandb.Table(data=roc_data, columns=["FPR", "TPR"])
+        pr_table = wandb.Table(data=pr_data, columns=["Recall", "Precision"])
+
+        wandb.log(
+            {f"{stage}/ROC": wandb.plot.line(roc_table, "FPR", "TPR", title="ROC")}
+        )
+        wandb.log(
+            {
+                f"{stage}/PR": wandb.plot.line(
+                    pr_table, "Recall", "Precision", title="PR"
+                )
+            }
+        )
+        
+        return {
+            "AP": picai_metrics.AP,
+            "AUROC": picai_metrics.auroc,
+            "PICAI-Score": picai_metrics.score,
+        }
