@@ -1,7 +1,7 @@
-class_path: system.System
+class_path: mamba_mic.system.System
 init_args:
   net:
-    class_path: models.segmamba.SegMamba
+    class_path: mamba_mic.models.segmamba.SegMamba
     init_args:
       in_chans: 3
       out_chans: 1

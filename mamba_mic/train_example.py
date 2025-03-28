@@ -1,10 +1,10 @@
-from data_modules.decathlon import DecathlonDataModule
-from models.unet import UNetModel
 import lightning.pytorch as pl
 from monai.networks.nets.unet import UNet
 import wandb
-
 from pathlib import Path
+
+from mamba_mic.data_modules.decathlon import DecathlonDataModule
+from mamba_mic.models.unet import UNetModel
 
 
 def train():

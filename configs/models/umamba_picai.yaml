@@ -1,4 +1,4 @@
-class_path: system.System
+class_path: mamba_mic.system.System
 init_args:
   include_background: true
   criterion:
@@ -8,7 +8,7 @@ init_args:
       gamma: 1.0
       squared_pred: true
   net:
-    class_path: models.umamba.UMambaEnc
+    class_path: mamba_mic.models.umamba.UMambaEnc
     init_args: 
       input_size: [256, 256, 24]
       input_channels: 3

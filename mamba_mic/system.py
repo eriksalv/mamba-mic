@@ -11,8 +11,9 @@ from monai.losses.dice import FocalLoss
 from picai_eval.eval import evaluate_case
 from report_guided_annotation import extract_lesion_candidates
 from torch.nn.modules.loss import _Loss
-from data_modules.pi_caiv2 import PICAIV2DataModule, evaluate_cases
 import wandb
+
+from mamba_mic.data_modules.pi_caiv2 import PICAIV2DataModule, evaluate_cases
 
 
 class System(pl.LightningModule):
@@ -104,7 +105,7 @@ class System(pl.LightningModule):
     def infer_batch(self, batch, val=False):
         if isinstance(batch, list):
             batch = batch[0]
-            
+
         x, y = batch["image"], batch["label"]
 
         if self.do_slice_inference:
@@ -117,7 +118,7 @@ class System(pl.LightningModule):
 
     def training_step(self, batch, batch_idx):
         y_hat, y = self.infer_batch(batch)
-        
+
         loss = self.criterion(y_hat, y)
 
         self.log("train_loss", loss, prog_bar=True)
@@ -194,7 +195,7 @@ class System(pl.LightningModule):
     def configure_optimizers(self):
         optimizer = torch.optim.AdamW(self.parameters(), lr=self.lr)
         return optimizer
-    
+
     def log_picai_metrics(self, stage):
         picai_metrics = evaluate_cases(self.extra_metrics["picai"])
         self.extra_metrics["picai"] = []
@@ -222,7 +223,7 @@ class System(pl.LightningModule):
                 )
             }
         )
-        
+
         return {
             "AP": picai_metrics.AP,
             "AUROC": picai_metrics.auroc,

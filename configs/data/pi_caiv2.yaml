@@ -1,4 +1,4 @@
-class_path: data_modules.pi_caiv2.PICAIV2DataModule
+class_path: mamba_mic.data_modules.pi_caiv2.PICAIV2DataModule
 init_args:
   batch_size: 4
   num_workers: 20
@@ -62,10 +62,10 @@ init_args:
           init_args:
             keys: image
             channel_wise: true
-        - class_path: data_modules.pi_cai.ConvertToBinaryLabeld
+        - class_path: mamba_mic.data_modules.pi_cai.ConvertToBinaryLabeld
           init_args:
             keys: label
-        # - class_path: data_modules.util.slice_inference.ConcatAdjacentSlicesToChannelsd
+        # - class_path: mamba_mic.data_modules.util.slice_inference.ConcatAdjacentSlicesToChannelsd
         #   init_args:
         #     keys: image
         #     n_adjacent_slices: 1

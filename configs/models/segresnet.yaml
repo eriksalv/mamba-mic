@@ -1,4 +1,4 @@
-class_path: system.System
+class_path: mamba_mic.system.System
 init_args:
   net:
     class_path: monai.networks.nets.SegResNet

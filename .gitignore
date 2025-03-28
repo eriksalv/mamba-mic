@@ -1,10 +1,10 @@
 __pycache__
 /data
 .venv
-wandb
-checkpoints
-artifacts
-lightning_logs
+wandb/
+checkpoints/
+artifacts/
+lightning_logs/
 run_config.yaml
 build/
 tmp_gt/
@@ -13,3 +13,5 @@ idun_logs/
 causal-conv1d/
 mamba_2d/
 mamba_3d/
+mamba_mic.egg-info/
+tb_logs/
