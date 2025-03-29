@@ -10,3 +10,8 @@ requires-python = ">=3.11"
 
 [tool.setuptools]
 packages = ["mamba_mic"]
+
+[tool.ruff]
+line-length = 120
+src = ["mamba_mic"]
+target-version = "py311"
