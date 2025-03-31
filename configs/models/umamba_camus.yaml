@@ -1,0 +1,40 @@
+class_path: mamba_mic.camus_module.System
+init_args:
+  include_background: false
+  softmax: true
+  num_output_channels: 4
+  criterion:
+    class_path: monai.losses.DiceFocalLoss
+    init_args:
+      include_background: false
+      gamma: 1.0
+      softmax: true
+      squared_pred: true
+  net:
+    class_path: mamba_mic.models.umamba.UMambaEnc
+    init_args: 
+      input_size: [512, 512]
+      input_channels: 1
+      n_stages: 8
+      features_per_stage: [32, 64, 128, 256, 512, 512, 512, 512]
+      kernel_sizes:
+      - [3, 3]
+      - [3, 3]
+      - [3, 3]
+      - [3, 3]
+      - [3, 3]
+      - [3, 3]
+      - [3, 3]
+      - [3, 3]
+      strides:
+      - [1, 1]
+      - [2, 2]
+      - [2, 2]
+      - [2, 2]
+      - [2, 2]
+      - [2, 2]
+      - [2, 2]
+      - [2, 2]
+      n_conv_per_stage: [2, 2, 2, 2, 2, 2, 2, 2]
+      num_classes: 4
+      n_conv_per_stage_decoder: [2, 2, 2, 2, 2, 2, 2]

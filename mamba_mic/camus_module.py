@@ -8,12 +8,7 @@ from monai.metrics import (
 from monai.inferers import Inferer, SliceInferer
 from monai.transforms import Compose, Activations, AsDiscrete
 from monai.losses.dice import FocalLoss
-from picai_eval.eval import evaluate_case
-from report_guided_annotation import extract_lesion_candidates
 from torch.nn.modules.loss import _Loss
-import wandb
-
-from mamba_mic.data_modules.pi_caiv2 import PICAIV2DataModule, evaluate_cases
 
 
 class System(pl.LightningModule):
@@ -46,7 +41,7 @@ class System(pl.LightningModule):
 
         self.criterion = criterion if criterion else FocalLoss(include_background=include_background, gamma=2)
 
-        self.metrics = {
+        self.metrics_ed = {
             "dice": DiceMetric(include_background=include_background, reduction="mean_batch"),
             "hd95": HausdorffDistanceMetric(
                 include_background=include_background,
@@ -59,7 +54,20 @@ class System(pl.LightningModule):
                 reduction="mean_batch",
             ),
         }
-        self.extra_metrics = {"picai": []}
+
+        self.metrics_es = {
+            "dice": DiceMetric(include_background=include_background, reduction="mean_batch"),
+            "hd95": HausdorffDistanceMetric(
+                include_background=include_background,
+                distance_metric="euclidean",
+                percentile=95,
+                reduction="mean_batch",
+            ),
+            "confusion_matrix": ConfusionMatrixMetric(
+                metric_name=["precision", "sensitivity", "f1 score"],
+                reduction="mean_batch",
+            ),
+        }
 
         self.post_pred = (
             Compose([AsDiscrete(argmax=True, dim=1, to_onehot=num_output_channels)])
@@ -112,31 +120,25 @@ class System(pl.LightningModule):
         return loss
 
     def _shared_eval_step(self, batch, batch_idx):
-        y_hat, y = self.infer_batch(batch, val=True)
+        batch_ed = {"image": batch["ED"], "label": batch["ED_gt"]}
+        batch_es = {"image": batch["ES"], "label": batch["ES_gt"]}
 
-        loss = self.criterion(y_hat, y)
+        y_hat_ed, y_ed = self.infer_batch(batch_ed, val=True)
+        y_hat_es, y_es = self.infer_batch(batch_es, val=True)
 
-        y_hat_binarized = self.post_pred(y_hat)
+        loss_ed = self.criterion(y_hat_ed, y_ed)
+        loss_es = self.criterion(y_hat_es, y_es)
 
-        batch["image"] = batch["image"].squeeze(0)
-        batch["label"] = batch["label"].squeeze(0)
-        batch["pred"] = Activations(sigmoid=True, softmax=False)(y_hat).squeeze(0)
+        y_hat_binarized_ed = self.post_pred(y_hat_ed)
+        y_hat_binarized_es = self.post_pred(y_hat_es)
 
-        if isinstance(self.trainer.datamodule, PICAIV2DataModule):
-            _eval = evaluate_case(
-                y_true=batch["label"].squeeze().cpu().numpy(),
-                y_det=batch["pred"].squeeze().cpu().numpy(),
-                y_det_postprocess_func=lambda pred: extract_lesion_candidates(pred)[0],
-            )
-            self.extra_metrics["picai"].append(_eval)
+        for metric in self.metrics_ed.values():
+            metric(y_hat_binarized_ed, y_ed)
 
-        if self.trainer.state.fn in ["validate", "test", "predict"] and self.save_output:
-            self.trainer.datamodule.invert_and_save(batch)
+        for metric in self.metrics_es.values():
+            metric(y_hat_binarized_es, y_es)
 
-        for metric in self.metrics.values():
-            metric(y_hat_binarized, y)
-
-        return loss
+        return (loss_ed + loss_es) / 2
 
     def validation_step(self, batch, batch_idx):
         loss = self._shared_eval_step(batch, batch_idx)
@@ -150,22 +152,33 @@ class System(pl.LightningModule):
 
     def _shared_on_epoch_end(self, stage="val"):
         metrics = {}
-        for name, metric in self.metrics.items():
+        for name, metric in self.metrics_ed.items():
             per_channel = metric.aggregate()
 
             if name == "confusion_matrix":
                 for conf_name, conf_metric in zip(metric.metric_name, per_channel):
-                    metrics[f"{stage}_{conf_name}"] = conf_metric.mean()
+                    metrics[f"{stage}_{conf_name}_ed"] = conf_metric.mean()
                     metric.reset()
             else:
                 for i in range(len(per_channel)):
-                    metrics[f"channel{i}/{stage}_{name}"] = per_channel[i]
+                    metrics[f"channel{i}/{stage}_{name}_ed"] = per_channel[i]
 
-                metrics[f"{stage}_{name}"] = per_channel.mean()
+                metrics[f"{stage}_{name}_ed"] = per_channel.mean()
                 metric.reset()
 
-        if isinstance(self.trainer.datamodule, PICAIV2DataModule):
-            metrics |= self.log_picai_metrics(stage)
+        for name, metric in self.metrics_es.items():
+            per_channel = metric.aggregate()
+
+            if name == "confusion_matrix":
+                for conf_name, conf_metric in zip(metric.metric_name, per_channel):
+                    metrics[f"{stage}_{conf_name}_es"] = conf_metric.mean()
+                    metric.reset()
+            else:
+                for i in range(len(per_channel)):
+                    metrics[f"channel{i}/{stage}_{name}_es"] = per_channel[i]
+
+                metrics[f"{stage}_{name}_es"] = per_channel.mean()
+                metric.reset()
 
         self.log_dict(metrics, sync_dist=True)
 
@@ -178,21 +191,3 @@ class System(pl.LightningModule):
     def configure_optimizers(self):
         optimizer = torch.optim.AdamW(self.parameters(), lr=self.lr)
         return optimizer
-
-    def log_picai_metrics(self, stage):
-        picai_metrics = evaluate_cases(self.extra_metrics["picai"])
-        self.extra_metrics["picai"] = []
-
-        roc_data = [[fpr, tpr] for (fpr, tpr) in zip(picai_metrics.case_FPR, picai_metrics.case_TPR)]
-        pr_data = [[recall, precision] for (recall, precision) in zip(picai_metrics.recall, picai_metrics.precision)]
-        roc_table = wandb.Table(data=roc_data, columns=["FPR", "TPR"])
-        pr_table = wandb.Table(data=pr_data, columns=["Recall", "Precision"])
-
-        wandb.log({f"{stage}/ROC": wandb.plot.line(roc_table, "FPR", "TPR", title="ROC")})
-        wandb.log({f"{stage}/PR": wandb.plot.line(pr_table, "Recall", "Precision", title="PR")})
-
-        return {
-            "AP": picai_metrics.AP,
-            "AUROC": picai_metrics.auroc,
-            "PICAI-Score": picai_metrics.score,
-        }

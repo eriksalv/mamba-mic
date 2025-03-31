@@ -8,6 +8,7 @@ import SimpleITK as sitk
 import numpy as np
 import torch
 from mamba_mic.data_modules.util.kfold import kfold
+from mamba_mic.data_modules.util.select_random_slice import SelectRandomSliced
 
 
 class CAMUSDataModule(pl.LightningDataModule):
@@ -40,21 +41,25 @@ class CAMUSDataModule(pl.LightningDataModule):
 
         default_preprocess = T.Compose(
             [
-                T.Lambdad(keys=["image", "label"], func=lambda x: sitk_load(x)),
+                T.Lambdad(keys=["image", "label"], func=sitk_load),
                 # Adds metadata from `Info_<view>.cfg` files
                 T.ToMetaTensord(keys=["image", "label"]),
-                # Decollate the time dimension of the image and label into a list of images and labels
-                T.Decollated(keys=["image", "label"]),
                 # Scale intensities to [0, 1]
                 T.Lambdad(keys=["image"], func=lambda x: x / 255.0),
-                T.Lambdad(keys=["image", "label"], func=lambda x: x.unsqueeze(0)),
-                T.AsDiscreted(keys=["label"], to_onehot=4),
+                # Select a random slice from the time dimension
                 T.Resized(keys=["image", "label"], spatial_size=[512, 512], mode=("area", "nearest")),
+                T.Lambdad(keys=["label"], func=lambda x: x.unsqueeze(0)),
+                T.AsDiscreted(keys=["label"], to_onehot=4),
+                T.Lambdad(keys=["label"], func=lambda x: x.permute(1, 0, 2, 3)),
             ]
         )
 
+        self.preprocess_val = T.Lambda(get_es_ed_from_sequence)
+
         default_augment = T.Compose(
             [
+                SelectRandomSliced(keys=["image", "label"]),
+                T.SqueezeDimd(keys=["label"], dim=0),
                 T.RandFlipd(
                     keys=["image", "label"],
                     prob=0.4,
@@ -136,7 +141,7 @@ class CAMUSDataModule(pl.LightningDataModule):
             )
             self.val_set = CacheDataset(
                 test_subjects,
-                transform=self.preprocess,
+                transform=[self.preprocess, self.preprocess_val],
                 cache_rate=self.cache_rate,
             )
 
@@ -144,7 +149,7 @@ class CAMUSDataModule(pl.LightningDataModule):
         if stage == "test" or stage is None:
             self.test_set = CacheDataset(
                 test_subjects,
-                transform=self.preprocess,
+                transform=[self.preprocess, self.preprocess_val],
                 cache_rate=self.cache_rate,
             )
 
@@ -194,3 +199,21 @@ def load_meta(patient_path, view):
             key, value = line.split(": ")
             cfg[key.strip()] = value.strip()
     return cfg
+
+
+def get_es_ed_from_sequence(sequence):
+    """
+    Get the ED and ES frames from a sequence.
+    """
+    img = sequence["image"]
+    ED_frame = int(img.meta["ED"]) - 1
+    ES_frame = int(img.meta["ES"]) - 1
+
+    label = sequence["label"]
+
+    return {
+        "ED": img[ED_frame].unsqueeze(0),
+        "ES": img[ES_frame].unsqueeze(0),
+        "ED_gt": label[ED_frame],
+        "ES_gt": label[ES_frame],
+    }
