@@ -9,6 +9,9 @@ import numpy as np
 import json
 from PIL import Image, ImageOps
 from monai.data import MetaTensor
+import pandas as pd
+from scipy.ndimage import gaussian_filter
+
 
 class OcelotDataModule(pl.LightningDataModule):
     def __init__(
@@ -34,22 +37,19 @@ class OcelotDataModule(pl.LightningDataModule):
 
         
       
-        default_preprocess = T.Compose(
-            [  
-                # Correct the orientation of images once they are loaded
-                CorrectOrientationd(
-                keys=["img_tissue", "img_cell", "label_tissue", "label_cropped_tissue", "label_cell_mask"],
-                label_keys=["label_tissue" ]  # Labels should stay grayscale
+        default_preprocess = T.Compose([
+            CorrectOrientationd(
+                keys=["img_tissue", "img_cell", "label_tissue", "label_cropped_tissue"],
+                label_keys=["label_tissue"]
             ),
-                T.Lambdad(keys=["label_tissue"], func=onehot_tissue_label),
-                T.Lambdad(
-                    keys=["label_tissue", "label_cropped_tissue", "label_cell_mask"],
-                    func=exclude_bg,
-                ),
-                T.NormalizeIntensityd(keys=["img_tissue", "img_cell"]),  # Normalize intensity
-                T.ToTensord(keys=["img_tissue", "img_cell", "label_tissue", "label_cropped_tissue", "label_cell_mask"])
-            ]
-        )
+            #T.LoadImaged(keys=["img_tissue", "img_cell", "label_tissue", "label_cropped_tissue"]),
+            #T.EnsureChannelFirstd(keys = ["img_tissue", "img_cell", "label_tissue", "label_cropped_tissue"]),
+            T.Lambdad(keys=["label_tissue"], func=onehot_tissue_label),
+            T.Lambdad(keys=["label_tissue", "label_cropped_tissue"], func=exclude_bg),
+            T.NormalizeIntensityd(keys=["img_tissue", "img_cell"]),
+            SoftISMaskd(keys=["label_cell"]), 
+            T.ToTensord(keys=["img_tissue", "img_cell", "label_tissue", "label_cropped_tissue", "soft_is_mask"])
+        ])
        
         self.preprocess = preprocess if preprocess is not None else default_preprocess
 
@@ -59,15 +59,18 @@ class OcelotDataModule(pl.LightningDataModule):
             if augment is not None
             else T.Compose(
                         [
-                            #T.RandZoomd(
-                            #    keys=["img_tissue", "img_cell", "label_tissue", "label_cropped_tissue"], prob=0.7, min_zoom=0.9, max_zoom=1.1
-                            #),  
-                            #T.RandFlipd(
-                            #    keys=["img_tissue", "img_cell", "label_tissue", "label_cropped_tissue"], prob=1, spatial_axis=[0, 1]
-                            #),  # Random flip (horizontal or vertical)
-                            #T.RandRotate90d(
-                            #    keys=["img_tissue", "img_cell", "label_tissue", "label_cropped_tissue"], prob=1
-                            #),  # Random rotation by 90°, 180°, or 270°
+                            T.RandZoomd(
+                                keys=["img_tissue", "img_cell", "label_tissue", "label_cropped_tissue",
+                                 "soft_is_mask"], prob=0.7, min_zoom=0.9, max_zoom=1.1
+                            ),  
+                            T.RandFlipd(
+                                keys=["img_tissue", "img_cell", "label_tissue", "label_cropped_tissue",
+                                 "soft_is_mask"], prob=1, spatial_axis=[0, 1]
+                            ),  # Random flip (horizontal or vertical)
+                            T.RandRotate90d(
+                                keys=["img_tissue", "img_cell", "label_tissue", "label_cropped_tissue",
+                                 "soft_is_mask"], prob=1
+                            ),  # Random rotation by 90°, 180°, or 270°
                             T.RandAdjustContrastd(
                                 keys=["img_tissue", "img_cell"], prob=0.7, gamma=(0.8, 1.2)
                             ),  # Random brightness and contrast adjustment
@@ -129,18 +132,24 @@ class OcelotDataModule(pl.LightningDataModule):
     def collect_pairs_with_metadata(self, split):
         """
         Collects image-label pairs and retrieves metadata for tissue-cell alignment.
+        Ensures lists have the same length to prevent mismatches.
         """
         img_tissues = sorted(glob(os.path.join(self.image_dir, split, "tissue", "*.jpg")))
         img_cells = sorted(glob(os.path.join(self.image_dir, split, "cell", "*.jpg")))
         
         label_tissues = sorted(glob(os.path.join(self.label_dir, split, "tissue", "*.png")))
         label_cropped_tissues = sorted(glob(os.path.join(self.label_dir, split, "cropped_tissue", "*.png")))
-        label_cell_masks = sorted(glob(os.path.join(self.label_dir, split, "cell_mask_images", "*.png")))
+        #label_cell_masks = sorted(glob(os.path.join(self.label_dir, split, "cell_mask_images", "*.png")))
         label_cells = sorted(glob(os.path.join(self.label_dir, split, "cell", "*.csv")))
+
+        # Check if all lists have the same length
+        #list_lengths = [len(img_tissues), len(img_cells), len(label_tissues), len(label_cropped_tissues), len(label_cell_masks), len(label_cells)]
+        #if len(set(list_lengths)) > 1:
+        #    raise ValueError(f"Mismatch in file counts: {dict(zip(['img_tissues', 'img_cells', 'label_tissues', 'label_cropped_tissues', 'label_cell_masks', 'label_cells'], list_lengths))}")
 
         # Extract metadata per sample
         pairs = []
-        for i_t, i_c, l_t, l_ct, l_cm, l_c in zip(img_tissues, img_cells, label_tissues, label_cropped_tissues, label_cell_masks, label_cells):
+        for i_t, i_c, l_t, l_ct, l_c in zip(img_tissues, img_cells, label_tissues, label_cropped_tissues, label_cells):
             sample_id = os.path.basename(i_t).split(".")[0]  # Extract sample ID from filename
             if sample_id in self.metadata:
                 meta = self.metadata[sample_id]
@@ -149,10 +158,12 @@ class OcelotDataModule(pl.LightningDataModule):
                     "img_cell": i_c, 
                     "label_tissue": l_t,
                     "label_cropped_tissue": l_ct,
-                    "label_cell_mask": l_cm,
+                    #"label_cell_mask": l_cm,
                     "label_cell": l_c,
                     "meta": meta  # Attach metadata for cropping & alignment
                 })
+            else:
+                print(f"Warning: Sample ID {sample_id} not found in metadata.")
 
         return pairs
 
@@ -337,4 +348,62 @@ class CorrectOrientationd(T.MapTransform):
                 data[f"{key}_meta_dict"] = img_meta_tensor.meta
 
         return data
-               
+
+class SoftISMaskd(T.MapTransform):
+    """
+    A MONAI transform that converts cell centroid annotations from a CSV file into
+    a Soft Instance Segmentation (Soft IS) probability map using Gaussian kernels.
+
+    Outputs a 3-channel probability map: (background, tumor cells, background cells)
+    """
+
+    def __init__(self, keys, sigma=2, radius_in_microns = 1.4, image_size=(1024, 1024)):
+        """
+        Args:
+            keys (list of str): Keys that contain the CSV file paths (e.g., ["label_cell"]).
+            sigma (int): Standard deviation of the Gaussian kernel in pixels (~15 pixels = 3µm at 0.2mpp).
+            image_size (tuple): The size of the output probability map (height, width).
+        """
+        super().__init__(keys)
+        self.sigma = sigma
+        self.image_size = image_size
+        self.radius_in_microns = radius_in_microns
+
+    def __call__(self, data):
+        d = dict(data)
+        key = self.keys[0] 
+
+        csv_path = d[key]
+        df = pd.read_csv(csv_path, header=None, names=["x", "y", "class"])
+
+        # Initialize probability maps (H, W)
+        tumor_mask = np.zeros(self.image_size, dtype=np.float32)
+        background_cell_mask = np.zeros(self.image_size, dtype=np.float32)
+
+        # Process each centroid to create a soft instance segmentation - paper used nuclick, but this might be good enough
+        Y, X = np.ogrid[:self.image_size[0], :self.image_size[1]]
+        radius_in_px = int(self.radius_in_microns/0.2)
+        for _, row in df.iterrows():
+            x, y, cell_class = int(row["x"]), int(row["y"]), int(row["class"])
+            
+            if 0 <= x < self.image_size[1] and 0 <= y < self.image_size[0]:
+                mask = (X - x) ** 2 + (Y - y) ** 2 <= radius_in_px ** 2  # Create circle mask
+                if cell_class == 1:
+                    background_cell_mask[mask] = 1
+                elif cell_class == 2:
+                    tumor_mask[mask] = 1
+
+
+        tumor_mask = gaussian_filter(tumor_mask, sigma=self.sigma)
+        background_cell_mask = gaussian_filter(background_cell_mask, sigma=self.sigma)
+
+
+        total_fg = tumor_mask + background_cell_mask
+        background_mask = 1 - np.clip(total_fg, 0, 1)  
+        
+
+        soft_is_mask = np.stack([background_mask, background_cell_mask, tumor_mask], axis=0)  
+
+        # Convert to PyTorch tensor
+        d["soft_is_mask"] = torch.tensor(soft_is_mask, dtype=torch.float32)
+        return d
