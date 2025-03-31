@@ -58,7 +58,8 @@ class OcelotDataModule(pl.LightningDataModule):
             augment
             if augment is not None
             else T.Compose(
-                        [
+                        [   T.RandSpatialCropd(keys=["img_tissue", "img_cell", "label_tissue", "label_cropped_tissue",
+                                 "soft_is_mask"], roi_size=(512, 512)),
                             T.RandZoomd(
                                 keys=["img_tissue", "img_cell", "label_tissue", "label_cropped_tissue",
                                  "soft_is_mask"], prob=0.7, min_zoom=0.9, max_zoom=1.1

@@ -8,7 +8,15 @@ from monai.metrics import (
 from monai.inferers import Inferer, SliceInferer
 from monai.transforms import Compose, Activations, AsDiscrete
 from monai.losses.dice import FocalLoss, DiceCELoss
-from ocelot_util import normalize_crop_coords_batch
+from ocelot_util import (
+    normalize_crop_coords_batch,
+    evaluate_cell_detection_batch, 
+    cell_detection_postprocessing_batch, 
+    calculate_metrics, 
+    load_ground_truth,
+    compute_class_weights,
+    weighted_mse_loss,
+)
 
 class System(pl.LightningModule):
     def __init__(
@@ -58,44 +66,32 @@ class System(pl.LightningModule):
         
         if self.is_ocelot:
             self.tissue_criterion = DiceCELoss(
-              include_background=include_background,
-              sigmoid=not softmax,
-              softmax=softmax,
-              squared_pred=True,
-            )
-            self.cell_criterion = DiceCELoss(
-              include_background=include_background,
-              sigmoid=not softmax,
-              softmax=softmax,
-              squared_pred=True,
+            include_background=include_background,
+            sigmoid=not softmax,
+            softmax=softmax,
+            squared_pred=True,
             )
             self.tissue_metrics = {
-                "dice": DiceMetric(include_background=include_background, reduction="mean_batch"),
-                "hd95": HausdorffDistanceMetric(
-                    include_background=include_background,
-                    distance_metric="euclidean",
-                    percentile=95,
-                    reduction="mean_batch",
-                ),
-                "confusion_matrix": ConfusionMatrixMetric(
-                    metric_name=["accuracy", "precision", "sensitivity", "f1 score"],
-                    reduction="mean_batch",
-                ),
+            "dice": DiceMetric(include_background=include_background, reduction="mean_batch"),
+            "hd95": HausdorffDistanceMetric(
+                include_background=include_background,
+                distance_metric="euclidean",
+                percentile=95,
+                reduction="mean_batch",
+            ),
             }
 
-            self.cell_metrics = {
-                "dice": DiceMetric(include_background=include_background, reduction="mean_batch"),
-                "hd95": HausdorffDistanceMetric(
-                    include_background=include_background,
-                    distance_metric="euclidean",
-                    percentile=95,
-                    reduction="mean_batch",
-                ),
-                "confusion_matrix": ConfusionMatrixMetric(
-                    metric_name=["accuracy", "precision", "sensitivity", "f1 score"],
-                    reduction="mean_batch",
-                ),
-            }
+            self.cell_criterion = torch.nn.MSELoss()
+            
+            self.tp_tc_count = 0
+            self.fp_tc_count = 0
+            self.fn_tc_count = 0
+
+            self.tp_bc_count = 0
+            self.fp_bc_count = 0
+            self.fn_bc_count = 0
+
+            self.cell_post_transform = Activations(softmax = True,  dim=-1) 
 
         self.metrics = {
             "dice": DiceMetric(
@@ -155,15 +151,17 @@ class System(pl.LightningModule):
 
         if self.is_ocelot:
             y_t = batch["label_tissue"]
-            y_c = batch["label_cropped_tissue"]
+            cropped_label = batch["label_cropped_tissue"]
+            y_c = batch['soft_is_mask']
             meta_batch = batch["meta"]
         
             cropped_coords = normalize_crop_coords_batch(meta_batch)
             
             if val:
-                return self.val_inferer(inputs=(batch, self.trainer.datamodule, cropped_coords), network=self.net), y_t, y_c
+                return self.net.forward(batch ,cropped_coords, train_mode = False), y_t, y_c
 
-            t_pred, c_pred = self.net.forward(batch, self.trainer.datamodule, cropped_coords, train_mode=False)
+            t_pred, c_pred = self.net.forward(batch, cropped_coords,
+             tissue_label = y_t, cell_tissue_label = cropped_label, train_mode=True)
 
             return t_pred, c_pred, y_t, y_c
 
@@ -182,40 +180,20 @@ class System(pl.LightningModule):
         if self.is_ocelot:
             y_t_hat, y_c_hat, y_t, y_c = self.infer_batch(batch)
             tissue_loss = self.tissue_criterion(y_t_hat, y_t)
-            cell_loss = self.cell_criterion(y_c_hat, y_c)
-            
+            # Compute class weights per batch for cell segmentation
+            class_weights = compute_class_weights(y_c)  # Compute per batch
+            cell_loss = weighted_mse_loss(y_c_hat, y_c, class_weights)  # Apply weighted MS
+            #cell_loss = self.cell_criterion(y_c_hat, y_c)
             total_loss = tissue_loss + cell_loss
             self.log("train_cell_loss", cell_loss, prog_bar=True)
-            self.log("train_tissue_loss", tissue_loss, prog_bar=True)
+
+            if not self.net.is_pretrained:
+                self.log("train_tissue_loss", tissue_loss, prog_bar=True)
 
             return total_loss
         else:   
             y_hat, y = self.infer_batch(batch)
-            if self.use_bce:
-                empty_labels_mask = torch.all(y == 0, dim=(1, 2, 3, 4))  # Shape: [batch_size]
-
-                # Compute loss for non-empty labels
-                masked_y_hat = y_hat[~empty_labels_mask, ...]
-                masked_y = y[~empty_labels_mask, ...]
-
-                if masked_y_hat.numel() > 0 and masked_y.numel() > 0:
-                    non_empty_loss = self.criterion(masked_y_hat, masked_y)
-                else:
-                    non_empty_loss = torch.tensor(0.0, device=y_hat.device)
-
-                # Compute loss for empty labels (all zeros)
-                empty_masked_y_hat = y_hat[empty_labels_mask, ...]
-                empty_masked_y = y[empty_labels_mask, ...]
-
-                if empty_masked_y_hat.numel() > 0 and empty_masked_y.numel() > 0:
-                    empty_loss = self.empty_criterion(empty_masked_y_hat, empty_masked_y)
-                else:
-                    empty_loss = torch.tensor(0.0, device=y_hat.device)
-
-                # Total loss
-                loss = non_empty_loss + empty_loss
-            else:
-                loss = self.criterion(y_hat, y)
+            loss = self.criterion(y_hat, y)
 
             self.log("train_loss", loss, prog_bar=True)
 
@@ -226,19 +204,40 @@ class System(pl.LightningModule):
         if self.is_ocelot:
             y_t_hat, y_c_hat, y_t, y_c = self.infer_batch(batch)
             tissue_loss = self.tissue_criterion(y_t_hat, y_t)
-            cell_loss = self.cell_criterion(y_c_hat, y_c)
-            
+
+            class_weights = compute_class_weights(y_c)  
+            cell_loss = weighted_mse_loss(y_c_hat, y_c, class_weights) 
+
             total_loss = tissue_loss + cell_loss
 
             y_t_hat_binarized = self.post_pred(y_t_hat)
-            y_c_hat_binarized = self.post_pred(y_c_hat)
 
-            for name, metric in self.tissue_metrics.items():
-                metric(y_t_hat_binarized, y_t)
+            gt_cells_list, gt_classes_list = load_ground_truth(batch)
+            y_c_hat = self.cell_post_transform(y_c_hat)
 
-            # Compute cell metrics
-            for name, metric in self.cell_metrics.items():
-                metric(y_c_hat_binarized, y_c)
+            # Get predicted cells and their classes from the model outputs
+            pred_cells_list, pred_classes_list, confidences_list = cell_detection_postprocessing_batch(y_c_hat)
+
+            # Compute TP, FP, FN
+            total_tp_bc, total_fp_bc, total_fn_bc, total_tp_tc, total_fp_tc, total_fn_tc = evaluate_cell_detection_batch(
+                pred_cells_list, pred_classes_list, gt_cells_list, gt_classes_list,
+                )
+
+            self.tp_bc_count += total_tp_bc
+            self.fp_bc_count += total_fp_bc
+            self.fn_bc_count += total_fn_bc
+
+            self.tp_tc_count += total_tp_tc
+            self.fp_tc_count += total_fp_tc
+            self.fn_tc_count += total_fn_tc
+
+            
+
+            if not self.net.is_pretrained:
+                for name, metric in self.tissue_metrics.items():
+                    metric(y_t_hat_binarized, y_t)
+
+            
 
             return total_loss, tissue_loss, cell_loss
 
@@ -266,9 +265,11 @@ class System(pl.LightningModule):
     def validation_step(self, batch, batch_idx):
         if self.is_ocelot:
             loss, tissue_loss, cell_loss = self._shared_eval_step(batch, batch_idx)
-            self.log("val_loss", loss, sync_dist=True)
-            self.log("val_tissue_loss", tissue_loss, sync_dist=True)
+            self.log("val_loss", cell_loss, sync_dist=True)
+            if not self.net.is_pretrained:
+                self.log("val_tissue_loss", tissue_loss, sync_dist=True)
             self.log("val_cell_loss", cell_loss, sync_dist=True)
+
             return {"val_loss": loss}
         else:
             loss = self._shared_eval_step(batch, batch_idx)
@@ -284,33 +285,44 @@ class System(pl.LightningModule):
         metrics = {}
 
         if self.is_ocelot:
-            for name, metric in self.tissue_metrics.items():
-                per_channel = metric.aggregate()
+            if not self.net.is_pretrained:
+                for name, metric in self.tissue_metrics.items():
+                    per_channel = metric.aggregate()
 
-                if name == "confusion_matrix":
-                    for conf_name, conf_metric in zip(metric.metric_name, per_channel):
-                        metrics[f"{stage}_tissue_{conf_name}"] = conf_metric.mean()
+                    if name == "confusion_matrix":
+                        for conf_name, conf_metric in zip(metric.metric_name, per_channel):
+                            metrics[f"{stage}_tissue_{conf_name}"] = conf_metric.mean()
+                            metric.reset()
+                    else:
+                        for i in range(len(per_channel)):
+                            metrics[f"tissue_channel{i}/{stage}_{name}"] = per_channel[i]
+
+                        metrics[f"{stage}_tissue_{name}"] = per_channel.mean()
                         metric.reset()
-                else:
-                    for i in range(len(per_channel)):
-                        metrics[f"tissue_channel{i}/{stage}_{name}"] = per_channel[i]
 
-                    metrics[f"{stage}_tissue_{name}"] = per_channel.mean()
-                    metric.reset()
+            precision_bc, recall_bc, f1_bc = calculate_metrics(self.tp_bc_count, self.fp_bc_count, self.fn_bc_count)
+            precision_tc, recall_tc, f1_tc = calculate_metrics(self.tp_tc_count, self.fp_tc_count, self.fn_tc_count)
+            mean_f1 = (f1_bc + f1_tc) / 2
 
-           
-            for name, metric in self.cell_metrics.items():
-                per_channel = metric.aggregate()
+            metrics[f"{stage}_cell_bc_precision"] = precision_bc
+            metrics[f"{stage}_cell_bc_recall"] = recall_bc
+            metrics[f"{stage}_cell_bc_f1"] = f1_bc
 
-                if name == "confusion_matrix":
-                    for conf_name, conf_metric in zip(metric.metric_name, per_channel):
-                        metrics[f"{stage}_cell_{conf_name}"] = conf_metric.mean()
-                        metric.reset()
-                else:
-                    for i in range(len(per_channel)):
-                        metrics[f"cell_channel{i}/{stage}_{name}"] = per_channel[i]
-                    metrics[f"{stage}_cell_{name}"] = per_channel.mean()
-                    metric.reset()
+            metrics[f"{stage}_cell_tc_precision"] = precision_tc
+            metrics[f"{stage}_cell_tc_recall"] = recall_tc
+            metrics[f"{stage}_cell_tc_f1"] = f1_tc
+
+            metrics[f"{stage}_cell_mf1"] = mean_f1
+
+            
+            self.tp_tc_count = 0
+            self.fp_tc_count = 0
+            self.fn_tc_count = 0
+
+            self.tp_bc_count = 0
+            self.fp_bc_count = 0
+            self.fn_bc_count = 0
+
         else:
 
             for name, metric in self.metrics.items():

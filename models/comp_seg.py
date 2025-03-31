@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 from system import System
 import monai.transforms as T
+from monai.inferers import SlidingWindowInferer
 
 class CompositeSegmentationModel(nn.Module):
     def __init__(self, cs_net, ts_net = None, ts_pretrained_path: str = None, device='cuda'):  
@@ -26,25 +27,29 @@ class CompositeSegmentationModel(nn.Module):
                     T.AsDiscrete(threshold=0.5),
                 ]
             )
+        self.tissue_inferer = SlidingWindowInferer(roi_size=(512, 512),
+         overlap=0.5, sw_batch_size= 4, mode= "gaussian")
+        self.cell_inferer = SlidingWindowInferer(roi_size=(512, 512),
+         overlap=0.5, sw_batch_size = 4, mode= "gaussian")
 
-    def forward(self, batch, data_module, crop_coords = None,
+    def forward(self, batch, crop_coords = None,
      tissue_label = None, cell_tissue_label=None,
-      train_mode=False, parallelize_invert = False,
-       only_tissue = False):
+      train_mode=False, parallelize_invert = False):
         
         large_fov = batch["img_tissue"].to(self.device)
         small_fov = batch["img_cell"].to(self.device)  
 
         batch_size = large_fov.shape[0]
-        tissue_pred = self.tissue_segmentation(large_fov).to(self.device)  
 
-        if only_tissue:
-            return tissue_pred
+        if train_mode:
+            tissue_pred = self.tissue_segmentation(large_fov)
+        else:
+            tissue_pred = self.tissue_inferer(large_fov, self.tissue_segmentation)
 
         if train_mode and tissue_label is not None and cell_tissue_label is not None:
             tissue_label = tissue_label.to(self.device) 
             tissue_crop = cell_tissue_label
-            combined_input = torch.cat([small_fov, large_fov, tissue_label, tissue_crop], dim=1).to(self.device)  
+            combined_input = torch.cat([small_fov, tissue_crop], dim=1).to(self.device)  
             cell_pred = self.cell_segmentation(combined_input)
             return tissue_pred, cell_pred
 
@@ -63,8 +68,8 @@ class CompositeSegmentationModel(nn.Module):
 
             resized_crops = torch.cat(tissue_crops_resized_list, dim=0).to(self.device)
 
-            combined_input = torch.cat([small_fov, large_fov, post_tissue_pred, resized_crops], dim=1).to(self.device)  
-            cell_pred = self.cell_segmentation(combined_input)
+            combined_input = torch.cat([small_fov, resized_crops], dim=1).to(self.device)  
+            cell_pred = self.cell_inferer(combined_input, self.cell_segmentation)
 
             return tissue_pred, cell_pred
 
