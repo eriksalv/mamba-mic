@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 from scipy.spatial import cKDTree
 from scipy.ndimage import gaussian_filter
-
+import cv2
 def normalize_crop_coords_batch(meta_batch):
     """
     Convert whole-slide image coordinates to downsampled tissue patch coordinates for a batch.
@@ -75,7 +75,7 @@ def normalize_crop_coords(meta):
 
     return (x1, y1, x2, y2)
 
-def cell_detection_postprocessing(y_tc, y_bc, y_bg, min_distance=4):
+def cell_detection_postprocessing(y_tc, y_bc, y_bg, min_distance=3):
     if isinstance(y_tc, torch.Tensor):
         y_tc = y_tc.cpu().numpy()
     if isinstance(y_bc, torch.Tensor):
@@ -83,10 +83,10 @@ def cell_detection_postprocessing(y_tc, y_bc, y_bg, min_distance=4):
     if isinstance(y_bg, torch.Tensor):
         y_bg = y_bg.cpu().numpy()
     # Compute foreground probability
-    foreground = y_tc + y_bc
-    foreground = gaussian_filter(foreground, sigma=4)
+    foreground = 1 - y_bg
+    foreground = cv2.GaussianBlur(foreground, (0, 0), sigmaX=3)
     # Detect peaks (local maxima)
-    cell_candidates = peak_local_max(foreground, min_distance=min_distance)
+    cell_candidates = peak_local_max(foreground, min_distance=min_distance, exclude_border=0, threshold_abs=0.0)
 
     # Store valid cells, classes, and confidence scores
     valid_cells = []
@@ -217,7 +217,7 @@ def evaluate_cell_detection_batch(pred_cells_list, pred_classes_list, gt_cells_l
 def load_ground_truth(batch):
     gt_cells_list = []
     gt_classes_list = []
-
+ 
     for csv_path in batch['label_cell']:  # Iterate over CSV file paths
         df = pd.read_csv(csv_path, header=None, names=["x", "y", "class"])
         gt_cells_list.append(df[['y', 'x']].values)  # Store (x, y) coords

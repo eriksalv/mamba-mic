@@ -18,6 +18,7 @@ from ocelot_util import (
     weighted_mse_loss,
 )
 
+
 class System(pl.LightningModule):
     def __init__(
         self,
@@ -35,6 +36,7 @@ class System(pl.LightningModule):
         slice_batch_size=None,
         save_output=False,
         is_ocelot = False,
+        tissue_only = False,
     ) -> None:
         super().__init__()
         self.net = net
@@ -45,6 +47,7 @@ class System(pl.LightningModule):
         self.use_bce = use_bce
         self.use_focal = use_focal
         self.is_ocelot = is_ocelot
+        self.tissue_only = tissue_only
 
         assert (num_output_channels is None and softmax is False) or (
             num_output_channels is not None and softmax is True
@@ -67,8 +70,8 @@ class System(pl.LightningModule):
         if self.is_ocelot:
             self.tissue_criterion = DiceCELoss(
             include_background=include_background,
-            sigmoid=not softmax,
-            softmax=softmax,
+            sigmoid=True,
+            softmax=False,
             squared_pred=True,
             )
             self.tissue_metrics = {
@@ -81,8 +84,14 @@ class System(pl.LightningModule):
             ),
             }
 
-            self.cell_criterion = torch.nn.MSELoss()
-            
+            #self.cell_criterion = torch.nn.MSELoss()
+            self.cell_criterion = DiceCELoss(
+            include_background=include_background,
+            sigmoid=False,
+            softmax=True,
+            squared_pred=True,
+            )
+
             self.tp_tc_count = 0
             self.fp_tc_count = 0
             self.fn_tc_count = 0
@@ -91,7 +100,7 @@ class System(pl.LightningModule):
             self.fp_bc_count = 0
             self.fn_bc_count = 0
 
-            self.cell_post_transform = Activations(softmax = True,  dim=-1) 
+      
 
         self.metrics = {
             "dice": DiceMetric(
@@ -156,9 +165,14 @@ class System(pl.LightningModule):
             meta_batch = batch["meta"]
         
             cropped_coords = normalize_crop_coords_batch(meta_batch)
-            
+            if self.tissue_only:
+                if val:
+                    return self.val_inferer(inputs=batch['img_tissue'], network=self.net), y_t
+                return self(batch['img_tissue']), y_t
+
             if val:
-                return self.net.forward(batch ,cropped_coords, train_mode = False), y_t, y_c
+                t_pred, c_pred =  self.net.forward(batch,cropped_coords, train_mode = False)
+                return t_pred, c_pred, y_t, y_c
 
             t_pred, c_pred = self.net.forward(batch, cropped_coords,
              tissue_label = y_t, cell_tissue_label = cropped_label, train_mode=True)
@@ -178,12 +192,18 @@ class System(pl.LightningModule):
 
     def training_step(self, batch, batch_idx):
         if self.is_ocelot:
+            if self.tissue_only:
+                y_t_hat, y_t = self.infer_batch(batch)
+                tissue_loss = self.tissue_criterion(y_t_hat, y_t)
+                self.log("train_tissue_loss", tissue_loss, prog_bar=True)
+                return tissue_loss
+
             y_t_hat, y_c_hat, y_t, y_c = self.infer_batch(batch)
             tissue_loss = self.tissue_criterion(y_t_hat, y_t)
             # Compute class weights per batch for cell segmentation
-            class_weights = compute_class_weights(y_c)  # Compute per batch
-            cell_loss = weighted_mse_loss(y_c_hat, y_c, class_weights)  # Apply weighted MS
-            #cell_loss = self.cell_criterion(y_c_hat, y_c)
+            #class_weights = compute_class_weights(y_c)  # Compute per batch
+            #cell_loss = weighted_mse_loss(y_c_hat, y_c, class_weights)  # Apply weighted MS
+            cell_loss = self.cell_criterion(y_c_hat, y_c)
             total_loss = tissue_loss + cell_loss
             self.log("train_cell_loss", cell_loss, prog_bar=True)
 
@@ -202,18 +222,26 @@ class System(pl.LightningModule):
     def _shared_eval_step(self, batch, batch_idx):
 
         if self.is_ocelot:
-            y_t_hat, y_c_hat, y_t, y_c = self.infer_batch(batch)
-            tissue_loss = self.tissue_criterion(y_t_hat, y_t)
-
-            class_weights = compute_class_weights(y_c)  
-            cell_loss = weighted_mse_loss(y_c_hat, y_c, class_weights) 
-
-            total_loss = tissue_loss + cell_loss
+            if self.tissue_only:
+                y_t_hat, y_t = self.infer_batch(batch, val=True)
+            else:
+                y_t_hat, y_c_hat, y_t, y_c = self.infer_batch(batch, val=True)
 
             y_t_hat_binarized = self.post_pred(y_t_hat)
+            tissue_loss = self.tissue_criterion(y_t_hat, y_t)
+
+            if self.tissue_only:
+                for name, metric in self.tissue_metrics.items():
+                    metric(y_t_hat_binarized, y_t)
+                return tissue_loss
+
+            #class_weights = compute_class_weights(y_c)  
+            #cell_loss = weighted_mse_loss(y_c_hat, y_c, class_weights) 
+            cell_loss = self.cell_criterion(y_c_hat, y_c)
+            total_loss = tissue_loss + cell_loss
+
 
             gt_cells_list, gt_classes_list = load_ground_truth(batch)
-            y_c_hat = self.cell_post_transform(y_c_hat)
 
             # Get predicted cells and their classes from the model outputs
             pred_cells_list, pred_classes_list, confidences_list = cell_detection_postprocessing_batch(y_c_hat)
@@ -264,6 +292,11 @@ class System(pl.LightningModule):
 
     def validation_step(self, batch, batch_idx):
         if self.is_ocelot:
+            if self.tissue_only:
+                tissue_loss = self._shared_eval_step(batch, batch_idx)
+                self.log("val_loss", tissue_loss, sync_dist=True)
+                return {"val_loss": tissue_loss}
+
             loss, tissue_loss, cell_loss = self._shared_eval_step(batch, batch_idx)
             self.log("val_loss", cell_loss, sync_dist=True)
             if not self.net.is_pretrained:
@@ -285,43 +318,41 @@ class System(pl.LightningModule):
         metrics = {}
 
         if self.is_ocelot:
-            if not self.net.is_pretrained:
-                for name, metric in self.tissue_metrics.items():
-                    per_channel = metric.aggregate()
-
-                    if name == "confusion_matrix":
-                        for conf_name, conf_metric in zip(metric.metric_name, per_channel):
-                            metrics[f"{stage}_tissue_{conf_name}"] = conf_metric.mean()
-                            metric.reset()
-                    else:
-                        for i in range(len(per_channel)):
-                            metrics[f"tissue_channel{i}/{stage}_{name}"] = per_channel[i]
-
-                        metrics[f"{stage}_tissue_{name}"] = per_channel.mean()
+            for name, metric in self.tissue_metrics.items():
+                per_channel = metric.aggregate()
+                if name == "confusion_matrix":
+                    for conf_name, conf_metric in zip(metric.metric_name, per_channel):
+                        metrics[f"{stage}_tissue_{conf_name}"] = conf_metric.mean()
                         metric.reset()
+                else:
+                    for i in range(len(per_channel)):
+                        metrics[f"tissue_channel{i}/{stage}_{name}"] = per_channel[i]
+                    metrics[f"{stage}_tissue_{name}"] = per_channel.mean()
+                    metric.reset()
 
-            precision_bc, recall_bc, f1_bc = calculate_metrics(self.tp_bc_count, self.fp_bc_count, self.fn_bc_count)
-            precision_tc, recall_tc, f1_tc = calculate_metrics(self.tp_tc_count, self.fp_tc_count, self.fn_tc_count)
-            mean_f1 = (f1_bc + f1_tc) / 2
+            if not self.tissue_only:
+                precision_bc, recall_bc, f1_bc = calculate_metrics(self.tp_bc_count, self.fp_bc_count, self.fn_bc_count)
+                precision_tc, recall_tc, f1_tc = calculate_metrics(self.tp_tc_count, self.fp_tc_count, self.fn_tc_count)
+                mean_f1 = (f1_bc + f1_tc) / 2
 
-            metrics[f"{stage}_cell_bc_precision"] = precision_bc
-            metrics[f"{stage}_cell_bc_recall"] = recall_bc
-            metrics[f"{stage}_cell_bc_f1"] = f1_bc
+                metrics[f"{stage}_cell_bc_precision"] = precision_bc
+                metrics[f"{stage}_cell_bc_recall"] = recall_bc
+                metrics[f"{stage}_cell_bc_f1"] = f1_bc
 
-            metrics[f"{stage}_cell_tc_precision"] = precision_tc
-            metrics[f"{stage}_cell_tc_recall"] = recall_tc
-            metrics[f"{stage}_cell_tc_f1"] = f1_tc
+                metrics[f"{stage}_cell_tc_precision"] = precision_tc
+                metrics[f"{stage}_cell_tc_recall"] = recall_tc
+                metrics[f"{stage}_cell_tc_f1"] = f1_tc
 
-            metrics[f"{stage}_cell_mf1"] = mean_f1
+                metrics[f"{stage}_cell_mf1"] = mean_f1
 
-            
-            self.tp_tc_count = 0
-            self.fp_tc_count = 0
-            self.fn_tc_count = 0
+                
+                self.tp_tc_count = 0
+                self.fp_tc_count = 0
+                self.fn_tc_count = 0
 
-            self.tp_bc_count = 0
-            self.fp_bc_count = 0
-            self.fn_bc_count = 0
+                self.tp_bc_count = 0
+                self.fp_bc_count = 0
+                self.fn_bc_count = 0
 
         else:
 

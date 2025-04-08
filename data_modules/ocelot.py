@@ -373,36 +373,50 @@ class SoftISMaskd(T.MapTransform):
     def __call__(self, data):
         d = dict(data)
         key = self.keys[0] 
-
+        
         csv_path = d[key]
         df = pd.read_csv(csv_path, header=None, names=["x", "y", "class"])
-
         # Initialize probability maps (H, W)
         tumor_mask = np.zeros(self.image_size, dtype=np.float32)
         background_cell_mask = np.zeros(self.image_size, dtype=np.float32)
-
+        total_fg = np.zeros(self.image_size, dtype=np.float32)
+        soft_is_mask = np.zeros((3, *self.image_size), dtype=np.float32)
         # Process each centroid to create a soft instance segmentation - paper used nuclick, but this might be good enough
         Y, X = np.ogrid[:self.image_size[0], :self.image_size[1]]
         radius_in_px = int(self.radius_in_microns/0.2)
+        expected_area = np.pi * (radius_in_px ** 2)
+
         for _, row in df.iterrows():
             x, y, cell_class = int(row["x"]), int(row["y"]), int(row["class"])
             
             if 0 <= x < self.image_size[1] and 0 <= y < self.image_size[0]:
-                mask = (X - x) ** 2 + (Y - y) ** 2 <= radius_in_px ** 2  # Create circle mask
+                mask = (X - x) ** 2 + (Y - y) ** 2 <= radius_in_px ** 2
+                y_min, y_max = max(0, y - radius_in_px), min(self.image_size[0], y + radius_in_px + 1)
+                x_min, x_max = max(0, x - radius_in_px), min(self.image_size[1], x + radius_in_px + 1)
+                
+                mask_cropped = mask[y_min:y_max, x_min:x_max]
+
+                # Apply the mask to the corresponding area in the full image
+                if cell_class == 1:
+                    background_cell_mask[y_min:y_max, x_min:x_max] = np.maximum(background_cell_mask[y_min:y_max, x_min:x_max], mask_cropped)
+                elif cell_class == 2:
+                    tumor_mask[y_min:y_max, x_min:x_max] = np.maximum(tumor_mask[y_min:y_max, x_min:x_max], mask_cropped)
+
+                # Calculate the sum of the mask (i.e., the number of pixels inside the mask)
+                mask_sum = np.sum(mask_cropped)
+               
                 if cell_class == 1:
                     background_cell_mask[mask] = 1
                 elif cell_class == 2:
                     tumor_mask[mask] = 1
 
-
+        
         tumor_mask = gaussian_filter(tumor_mask, sigma=self.sigma)
         background_cell_mask = gaussian_filter(background_cell_mask, sigma=self.sigma)
-
 
         total_fg = tumor_mask + background_cell_mask
         background_mask = 1 - np.clip(total_fg, 0, 1)  
         
-
         soft_is_mask = np.stack([background_mask, background_cell_mask, tumor_mask], axis=0)  
 
         # Convert to PyTorch tensor
