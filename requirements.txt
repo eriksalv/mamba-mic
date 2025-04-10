@@ -20,3 +20,7 @@ jsonargparse==4.33.2
 timm
 fvcore
 SimpleITK
+pandas
+scipy
+scikit-image
+opencv-python

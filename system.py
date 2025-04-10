@@ -100,6 +100,7 @@ class System(pl.LightningModule):
             self.fp_bc_count = 0
             self.fn_bc_count = 0
 
+            self.cell_post_transform = Activations(softmax = True,  dim=1)
       
 
         self.metrics = {
@@ -209,8 +210,10 @@ class System(pl.LightningModule):
 
             if not self.net.is_pretrained:
                 self.log("train_tissue_loss", tissue_loss, prog_bar=True)
+                return total_loss
 
-            return total_loss
+            return cell_loss
+
         else:   
             y_hat, y = self.infer_batch(batch)
             loss = self.criterion(y_hat, y)
@@ -239,7 +242,8 @@ class System(pl.LightningModule):
             #cell_loss = weighted_mse_loss(y_c_hat, y_c, class_weights) 
             cell_loss = self.cell_criterion(y_c_hat, y_c)
             total_loss = tissue_loss + cell_loss
-
+            
+            y_c_hat = self.cell_post_transform(y_c_hat)
 
             gt_cells_list, gt_classes_list = load_ground_truth(batch)
 
@@ -318,17 +322,18 @@ class System(pl.LightningModule):
         metrics = {}
 
         if self.is_ocelot:
-            for name, metric in self.tissue_metrics.items():
-                per_channel = metric.aggregate()
-                if name == "confusion_matrix":
-                    for conf_name, conf_metric in zip(metric.metric_name, per_channel):
-                        metrics[f"{stage}_tissue_{conf_name}"] = conf_metric.mean()
+            if not self.net.is_pretrained:
+                for name, metric in self.tissue_metrics.items():
+                    per_channel = metric.aggregate()
+                    if name == "confusion_matrix":
+                        for conf_name, conf_metric in zip(metric.metric_name, per_channel):
+                            metrics[f"{stage}_tissue_{conf_name}"] = conf_metric.mean()
+                            metric.reset()
+                    else:
+                        for i in range(len(per_channel)):
+                            metrics[f"tissue_channel{i}/{stage}_{name}"] = per_channel[i]
+                        metrics[f"{stage}_tissue_{name}"] = per_channel.mean()
                         metric.reset()
-                else:
-                    for i in range(len(per_channel)):
-                        metrics[f"tissue_channel{i}/{stage}_{name}"] = per_channel[i]
-                    metrics[f"{stage}_tissue_{name}"] = per_channel.mean()
-                    metric.reset()
 
             if not self.tissue_only:
                 precision_bc, recall_bc, f1_bc = calculate_metrics(self.tp_bc_count, self.fp_bc_count, self.fn_bc_count)
