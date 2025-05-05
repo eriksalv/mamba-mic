@@ -5,3 +5,6 @@ init_args:
   cache_rate: 1.0
   cv_folds: 10
   fold_index: 0
+  img_size: [128, 128]
+  # num_train_subjects: 10
+  # views: ["2CH"]

@@ -6,6 +6,8 @@ from pathlib import Path
 from typing import Tuple, Dict, Any
 import SimpleITK as sitk
 import numpy as np
+import PIL
+from PIL.Image import Resampling
 import torch
 from mamba_mic.data_modules.util.kfold import kfold
 from mamba_mic.data_modules.util.select_random_slice import SelectRandomSliced
@@ -18,13 +20,14 @@ class CAMUSDataModule(pl.LightningDataModule):
         data_dir="./data/CAMUS/database_nifti",
         cv_folds=10,
         fold_index=0,
-        views=None,
-        train_frac=None,
-        filter_poor_image_quality_for_training=False,
+        views=["2CH", "4CH"],
+        num_train_subjects=None,
+        filter_poor_image_quality=False,
         num_workers=4,
         cache_rate=0.0,
         preprocess=None,
         augment=None,
+        img_size=(512, 512),
         name="camus",
     ):
         super().__init__()
@@ -34,20 +37,21 @@ class CAMUSDataModule(pl.LightningDataModule):
         self.cache_rate = cache_rate
         self.cv_folds = cv_folds
         self.fold_index = fold_index
-        self.train_frac = train_frac
-        self.filter_poor_image_quality_for_training = filter_poor_image_quality_for_training
+        self.num_train_subjects = num_train_subjects
+        self.filter_poor_image_quality = filter_poor_image_quality
         self.name = name
-        self.views = views or ["2CH", "4CH"]
+        self.views = views
 
         default_preprocess = T.Compose(
             [
                 T.Lambdad(keys=["image", "label"], func=sitk_load),
+                T.Lambda(func=add_original_size),
                 # Adds metadata from `Info_<view>.cfg` files
                 T.ToMetaTensord(keys=["image", "label"]),
                 # Scale intensities to [0, 1]
                 T.Lambdad(keys=["image"], func=lambda x: x / 255.0),
                 # Select a random slice from the time dimension
-                T.Resized(keys=["image", "label"], spatial_size=[512, 512], mode=("area", "nearest")),
+                T.Resized(keys=["image", "label"], spatial_size=img_size, mode=("area", "nearest")),
                 T.Lambdad(keys=["label"], func=lambda x: x.unsqueeze(0)),
                 T.AsDiscreted(keys=["label"], to_onehot=4),
                 T.Lambdad(keys=["label"], func=lambda x: x.permute(1, 0, 2, 3)),
@@ -113,12 +117,18 @@ class CAMUSDataModule(pl.LightningDataModule):
     def setup(self, stage=None):
         train_subjects, test_subjects = kfold(self.subjects, self.cv_folds, shuffle=True, seed=42)[self.fold_index]
 
-        if self.train_frac and self.train_frac < 1.0:
-            train_subjects = train_subjects[: int(len(train_subjects) * self.train_frac)]
+        if self.num_train_subjects:
+            assert len(train_subjects) >= self.num_train_subjects, (
+                f"Not enough training subjects: {len(train_subjects)}"
+            )
+            train_subjects = train_subjects[: self.num_train_subjects]
 
-        if self.filter_poor_image_quality_for_training:
+        if self.filter_poor_image_quality:
             train_subjects = [
                 subject for subject in train_subjects if subject["image_meta_dict"]["ImageQuality"] != "Poor"
+            ]
+            test_subjects = [
+                subject for subject in test_subjects if subject["image_meta_dict"]["ImageQuality"] != "Poor"
             ]
 
         # Sanity check. Should be 450 * 2 training subjects
@@ -172,6 +182,29 @@ class CAMUSDataModule(pl.LightningDataModule):
     def test_dataloader(self):
         return DataLoader(self.test_set, batch_size=1, num_workers=self.num_workers, shuffle=False)
 
+    def invert_and_save(self, sample, output_postfix="pred"):
+        meta = sample["image"].meta
+        size = meta["original_size"][::-1]
+        patient_id = meta["patient_id"]
+        view = meta["view"]
+
+        pred_ed = sample["pred_ed"].squeeze(0).argmax(dim=0).float().cpu().numpy()
+        pred_es = sample["pred_es"].squeeze(0).argmax(dim=0).float().cpu().numpy()
+
+        pred_ed_resized = resize_image(pred_ed, size)
+        pred_es_resized = resize_image(pred_es, size)
+
+        out_dir = Path(self.data_dir) / self.name
+
+        if not out_dir.exists():
+            out_dir.mkdir(parents=True, exist_ok=True)
+
+        out_path_ed = out_dir / f"{patient_id}_{view}_ED_{output_postfix}.nii.gz"
+        out_path_es = out_dir / f"{patient_id}_{view}_ES_{output_postfix}.nii.gz"
+
+        sitk.WriteImage(sitk.GetImageFromArray(pred_ed_resized), str(out_path_ed))
+        sitk.WriteImage(sitk.GetImageFromArray(pred_es_resized), str(out_path_es))
+
 
 def sitk_load(filepath: str | Path) -> Tuple[np.ndarray, Dict[str, Any]]:
     """Loads an image using SimpleITK and returns the image and its metadata.
@@ -192,6 +225,21 @@ def sitk_load(filepath: str | Path) -> Tuple[np.ndarray, Dict[str, Any]]:
     return im_array
 
 
+def resize_image(image: np.ndarray, size: Tuple[int, int], resample: Resampling = Resampling.NEAREST) -> np.ndarray:
+    """Resizes the image to the specified dimensions.
+
+    Args:
+        image: (H, W), Input image to resize. Must be in a format supported by PIL.
+        size: Width (W') and height (H') dimensions of the resized image to output.
+        resample: Resampling filter to use.
+
+    Returns:
+        (H', W'), Input image resized to the specified dimensions.
+    """
+    resized_image = np.array(PIL.Image.fromarray(image).resize(size, resample=resample))
+    return resized_image
+
+
 def load_meta(patient_path, view):
     cfg = {"view": view, "patient_id": patient_path.name}
     with open(patient_path / f"Info_{view}.cfg", "r") as f:
@@ -199,6 +247,11 @@ def load_meta(patient_path, view):
             key, value = line.split(": ")
             cfg[key.strip()] = value.strip()
     return cfg
+
+
+def add_original_size(sample):
+    sample["image_meta_dict"]["original_size"] = sample["image"].shape[1:]
+    return sample
 
 
 def get_es_ed_from_sequence(sequence):
@@ -212,6 +265,8 @@ def get_es_ed_from_sequence(sequence):
     label = sequence["label"]
 
     return {
+        "image": img,
+        "label": label,
         "ED": img[ED_frame].unsqueeze(0),
         "ES": img[ES_frame].unsqueeze(0),
         "ED_gt": label[ED_frame],

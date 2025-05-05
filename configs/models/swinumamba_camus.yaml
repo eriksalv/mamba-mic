@@ -4,24 +4,22 @@ init_args:
   softmax: true
   num_output_channels: 4
   criterion:
-    class_path: monai.losses.DiceFocalLoss
+    class_path: monai.losses.DiceCELoss
     init_args:
       include_background: false
-      gamma: 1.0
       softmax: true
-      squared_pred: true
   net:
     class_path: mamba_mic.models.swin_umamba.SwinUMambaD
     init_args: 
       vss_args:
         in_chans: 1
         patch_size: 4
-        depths: [2, 2, 9, 2]
-        dims: 96
+        depths: [2, 2, 4, 2]
+        dims: 48
         drop_path_rate: 0.2
       decoder_args:
         num_classes: 4
         deep_supervision: false
-        features_per_stage: [96, 192, 384, 768]
+        features_per_stage: [48, 96, 192, 384]
         drop_path_rate: 0.2
         d_state: 16

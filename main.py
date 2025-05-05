@@ -11,7 +11,7 @@ class MyLightningCLI(LightningCLI):
     def add_arguments_to_parser(self, parser):
         parser.add_argument("--wandb.project", required=True)
         parser.add_argument("--wandb.name", required=True)
-        parser.add_argument("--wandb.notes", required=False)
+        parser.add_argument("--wandb.group", required=False)
         parser.add_argument("--wandb.watch_model", default=False)
 
         parser.link_arguments("wandb.name", "data.init_args.name")
@@ -23,7 +23,7 @@ class MyLightningCLI(LightningCLI):
             config=self.config_dump,
             project=wandb_config["project"],
             name=wandb_config["name"],
-            notes=wandb_config["notes"],
+            group=wandb_config["group"],
         )
         if wandb_config["watch_model"]:
             wandb.watch(self.model, log_freq=100)
@@ -39,9 +39,7 @@ class MyLightningCLI(LightningCLI):
 
 
 class MySaveConfigCallback(SaveConfigCallback):
-    def save_config(
-        self, trainer: pl.Trainer, pl_module: pl.LightningModule, stage: str
-    ) -> None:
+    def save_config(self, trainer: pl.Trainer, pl_module: pl.LightningModule, stage: str) -> None:
         self.parser.save(
             self.config,
             "run_config.yaml",

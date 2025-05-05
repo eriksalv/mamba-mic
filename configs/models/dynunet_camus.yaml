@@ -4,21 +4,18 @@ init_args:
   softmax: true
   num_output_channels: 4
   criterion:
-    class_path: monai.losses.DiceFocalLoss
+    class_path: monai.losses.DiceCELoss
     init_args:
       include_background: false
-      gamma: 1.0
       softmax: true
-      squared_pred: true
   net:
     class_path: monai.networks.nets.dynunet.DynUNet
     init_args:
       spatial_dims: 2
       in_channels: 1
       out_channels: 4
+      filters: [32, 64, 128, 256, 512, 512]
       kernel_size:
-      - [3, 3]
-      - [3, 3]
       - [3, 3]
       - [3, 3]
       - [3, 3]
@@ -32,11 +29,7 @@ init_args:
       - [2, 2]
       - [2, 2]
       - [2, 2]
-      - [2, 2]
-      - [2, 2]
       upsample_kernel_size:
-      - [2, 2]
-      - [2, 2]
       - [2, 2]
       - [2, 2]
       - [2, 2]

@@ -1,0 +1,36 @@
+class_path: mamba_mic.camus_module.System
+init_args:
+  include_background: false
+  softmax: true
+  num_output_channels: 4
+  criterion:
+    class_path: monai.losses.DiceCELoss
+    init_args:
+      include_background: false
+      softmax: true
+  net:
+    class_path: mamba_mic.models.unet.UNet
+    init_args: 
+      encoder:
+        class_path: mamba_mic.models.vssd.Backbone_VSSD
+        init_args:
+          img_size: 128
+          patch_size: 4
+          num_classes: 4
+          in_chans: 1
+          embed_dim: 48
+          depths: [2, 2, 4, 2]
+          num_heads: [6, 12, 24, 48]
+          mlp_ratio: 4.0
+          qkv_bias: true
+          drop_rate: 0.0
+          drop_path_rate: 0.2
+      decoder:
+        class_path: mamba_mic.models.swin_umamba.UNetResDecoder
+        init_args:
+          num_classes: 4
+          deep_supervision: false
+          features_per_stage: [48, 96, 192, 384]
+          drop_path_rate: 0.2
+          d_state: 16
+     

@@ -132,6 +132,11 @@ class System(pl.LightningModule):
         y_hat_binarized_ed = self.post_pred(y_hat_ed)
         y_hat_binarized_es = self.post_pred(y_hat_es)
 
+        if self.trainer.state.fn in ["validate", "test", "predict"] and self.save_output:
+            batch["pred_ed"] = y_hat_binarized_ed
+            batch["pred_es"] = y_hat_binarized_es
+            self.trainer.datamodule.invert_and_save(batch)
+
         for metric in self.metrics_ed.values():
             metric(y_hat_binarized_ed, y_ed)
 

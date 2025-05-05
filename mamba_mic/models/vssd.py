@@ -21,6 +21,10 @@ from fvcore.nn import FlopCountAnalysis, flop_count_str, flop_count, parameter_c
 from typing import Type
 
 
+def tTensor_shape(x):
+    return tuple([int(s) for s in x.shape])
+
+
 class tTensor(torch.Tensor):
     @property
     def shape(self):
@@ -28,13 +32,7 @@ class tTensor(torch.Tensor):
         return tuple([int(s) for s in shape])
 
 
-to_ttensor = lambda *args: (
-    tuple([tTensor(x) for x in args]) if len(args) > 1 else tTensor(args[0])
-)
-
-
 class ConvFFN(nn.Module):
-
     def __init__(self, channels, expansion=2, drop=0.0):
         super().__init__()
 
@@ -128,14 +126,10 @@ class Mamba2(nn.Module):
         self.chunk_size = chunk_size  # torch.tensor(chunk_size,dtype=torch.int32)
         self.use_mem_eff_path = use_mem_eff_path
         self.layer_idx = layer_idx
-        self.ssd_positve_dA = kwargs.get(
-            "ssd_positve_dA", True
-        )  # default to False, ablation for linear attn duality
+        self.ssd_positve_dA = kwargs.get("ssd_positve_dA", True)  # default to False, ablation for linear attn duality
         # Order: [z, x, B, C, dt]
         d_in_proj = 2 * self.d_inner + 2 * self.ngroups * self.d_state + self.nheads
-        self.in_proj = nn.Linear(
-            self.d_model, int(d_in_proj), bias=bias, **factory_kwargs
-        )  #
+        self.in_proj = nn.Linear(self.d_model, int(d_in_proj), bias=bias, **factory_kwargs)  #
 
         conv_dim = self.d_inner + 2 * self.ngroups * self.d_state
 
@@ -153,18 +147,14 @@ class Mamba2(nn.Module):
         # self.conv1d.weight._no_weight_decay = True
 
         if self.learnable_init_states:
-            self.init_states = nn.Parameter(
-                torch.zeros(self.nheads, self.headdim, self.d_state, **factory_kwargs)
-            )
+            self.init_states = nn.Parameter(torch.zeros(self.nheads, self.headdim, self.d_state, **factory_kwargs))
             self.init_states._no_weight_decay = True
 
         self.act = nn.SiLU()
 
         # Initialize log dt bias
         dt = torch.exp(
-            torch.rand(self.nheads, **factory_kwargs)
-            * (math.log(dt_max) - math.log(dt_min))
-            + math.log(dt_min)
+            torch.rand(self.nheads, **factory_kwargs) * (math.log(dt_max) - math.log(dt_min)) + math.log(dt_min)
         )
         dt = torch.clamp(dt, min=dt_init_floor)
         # Inverse of softplus: https://github.com/pytorch/pytorch/issues/72759
@@ -176,9 +166,7 @@ class Mamba2(nn.Module):
 
         # A parameter
         assert A_init_range[0] > 0 and A_init_range[1] >= A_init_range[0]
-        A = torch.empty(self.nheads, dtype=torch.float32, device=device).uniform_(
-            *A_init_range
-        )
+        A = torch.empty(self.nheads, dtype=torch.float32, device=device).uniform_(*A_init_range)
         A_log = torch.log(A).to(dtype=dtype)
         self.A_log = nn.Parameter(A_log)
         # self.register_buffer("A_log", torch.zeros(self.nheads, dtype=torch.float32, device=device), persistent=True)
@@ -192,9 +180,7 @@ class Mamba2(nn.Module):
         # assert RMSNormGated is not None
         # self.norm = RMSNormGated(self.d_inner, eps=1e-5, norm_before_gate=False, **factory_kwargs)
         self.norm = nn.LayerNorm(self.d_inner)
-        self.out_proj = nn.Linear(
-            self.d_inner, self.d_model, bias=bias, **factory_kwargs
-        )
+        self.out_proj = nn.Linear(self.d_inner, self.d_model, bias=bias, **factory_kwargs)
 
         # linear attention duality
         self.linear_attn_duality = linear_attn_duality
@@ -245,15 +231,9 @@ class Mamba2(nn.Module):
         else:
             assert head % self.ngroups == 0
             dstate = dstate // self.ngroups
-            K = K.view(batch, 1, seqlen, self.ngroups, dstate).permute(
-                0, 1, 3, 2, 4
-            )  # (B, 1, g, L, dstate)
-            V_scaled = V_scaled.view(
-                batch, head // self.ngroups, self.ngroups, seqlen, dim
-            )  # (B, H//g, g, L, D)
-            Q = C.view(batch, 1, seqlen, self.ngroups, dstate).permute(
-                0, 1, 3, 2, 4
-            )  # (B, 1, g, L, dstate)
+            K = K.view(batch, 1, seqlen, self.ngroups, dstate).permute(0, 1, 3, 2, 4)  # (B, 1, g, L, dstate)
+            V_scaled = V_scaled.view(batch, head // self.ngroups, self.ngroups, seqlen, dim)  # (B, H//g, g, L, D)
+            Q = C.view(batch, 1, seqlen, self.ngroups, dstate).permute(0, 1, 3, 2, 4)  # (B, 1, g, L, dstate)
 
             KV = K.transpose(-2, -1) @ V_scaled  # (B, H//g, g, dstate, D)
             x = Q @ KV  # (B, H//g, g, L, D)
@@ -261,9 +241,7 @@ class Mamba2(nn.Module):
                 batch, head // self.ngroups, self.ngroups, seqlen, dim
             )  # (B, H//g, g, L, D)
             x = x + V_skip  # (B, H//g, g, L, D)
-            x = (
-                x.permute(0, 3, 1, 2, 4).flatten(2, 3).reshape(batch, seqlen, head, dim)
-            )  # (B, L, H, D)
+            x = x.permute(0, 3, 1, 2, 4).flatten(2, 3).reshape(batch, seqlen, head, dim)  # (B, L, H, D)
             x = x.contiguous()
 
         return x
@@ -277,14 +255,8 @@ class Mamba2(nn.Module):
 
         zxbcdt = self.in_proj(u)  # (B, L, d_in_proj)
         A = -torch.exp(self.A_log)  # (nheads) or (d_inner, d_state)
-        initial_states = (
-            repeat(self.init_states, "... -> b ...", b=batch)
-            if self.learnable_init_states
-            else None
-        )
-        dt_limit_kwargs = (
-            {} if self.dt_limit == (0.0, float("inf")) else dict(dt_limit=self.dt_limit)
-        )
+        initial_states = repeat(self.init_states, "... -> b ...", b=batch) if self.learnable_init_states else None
+        dt_limit_kwargs = {} if self.dt_limit == (0.0, float("inf")) else dict(dt_limit=self.dt_limit)
 
         z, xBC, dt = torch.split(
             zxbcdt,
@@ -306,7 +278,6 @@ class Mamba2(nn.Module):
             [self.d_inner, self.ngroups * self.d_state, self.ngroups * self.d_state],
             dim=-1,
         )
-        x, dt, A, B, C = to_ttensor(x, dt, A, B, C)
         if self.linear_attn_duality:
             y = self.non_casual_linear_attn(
                 rearrange(x, "b l (h p) -> b l h p", p=self.headdim),
@@ -321,19 +292,11 @@ class Mamba2(nn.Module):
         else:
             if self.kwargs.get("bidirection", False):
                 # assert self.ngroups == 2 #only support bidirectional with 2 groups
-                x = to_ttensor(
-                    rearrange(x, "b l (h p) -> b l h p", p=self.headdim)
-                ).chunk(2, dim=-2)
-                B = to_ttensor(
-                    rearrange(B, "b l (g n) -> b l g n", g=self.ngroups)
-                ).chunk(2, dim=-2)
-                C = to_ttensor(
-                    rearrange(C, "b l (g n) -> b l g n", g=self.ngroups)
-                ).chunk(2, dim=-2)
+                x = rearrange(x, "b l (h p) -> b l h p", p=self.headdim).chunk(2, dim=-2)
+                B = rearrange(B, "b l (g n) -> b l g n", g=self.ngroups).chunk(2, dim=-2)
+                C = rearrange(C, "b l (g n) -> b l g n", g=self.ngroups).chunk(2, dim=-2)
                 dt = dt.chunk(2, dim=-1)  # (B, L, nheads) -> (B, L, nheads//2)*2
-                A, D = A.chunk(2, dim=-1), self.D.chunk(
-                    2, dim=-1
-                )  # (nheads) -> (nheads//2)*2
+                A, D = A.chunk(2, dim=-1), self.D.chunk(2, dim=-1)  # (nheads) -> (nheads//2)*2
                 y_forward = mamba_chunk_scan_combined(
                     x[0],
                     dt[0],
@@ -363,13 +326,13 @@ class Mamba2(nn.Module):
                 y = torch.cat([y_forward, y_backward.flip(1)], dim=-2)
             else:
                 y = mamba_chunk_scan_combined(
-                    to_ttensor(rearrange(x, "b l (h p) -> b l h p", p=self.headdim)),
-                    to_ttensor(dt),
-                    to_ttensor(A),
-                    to_ttensor(rearrange(B, "b l (g n) -> b l g n", g=self.ngroups)),
-                    to_ttensor(rearrange(C, "b l (g n) -> b l g n", g=self.ngroups)),
+                    rearrange(x, "b l (h p) -> b l h p", p=self.headdim),
+                    dt,
+                    A,
+                    rearrange(B, "b l (g n) -> b l g n", g=self.ngroups),
+                    rearrange(C, "b l (g n) -> b l g n", g=self.ngroups),
                     chunk_size=self.chunk_size,
-                    D=to_ttensor(self.D),
+                    D=self.D,
                     z=None,
                     seq_idx=seq_idx,
                     initial_states=initial_states,
@@ -427,9 +390,7 @@ class VMAMBA2Block(nn.Module):
         self.cpe1 = nn.Conv2d(dim, dim, 3, padding=1, groups=dim)
         self.norm1 = norm_layer(dim)
         if kwargs.get("attn_type", "mamba2") == "standard":
-            self.attn = StandardAttention(
-                dim=dim, heads=num_heads, dim_head=dim // num_heads, dropout=drop
-            )
+            self.attn = StandardAttention(dim=dim, heads=num_heads, dim_head=dim // num_heads, dropout=drop)
         elif kwargs.get("attn_type", "mamba2") == "mamba2":
             self.attn = Mamba2(
                 d_model=dim,
@@ -458,9 +419,7 @@ class VMAMBA2Block(nn.Module):
             H, W = self.input_resolution
             assert L == H * W, "input feature has wrong size"
 
-        x = x + self.cpe1(x.reshape(B, H, W, C).permute(0, 3, 1, 2)).flatten(2).permute(
-            0, 2, 1
-        )
+        x = x + self.cpe1(x.reshape(B, H, W, C).permute(0, 3, 1, 2)).flatten(2).permute(0, 2, 1)
         shortcut = x
 
         x = self.norm1(x)
@@ -468,9 +427,7 @@ class VMAMBA2Block(nn.Module):
         # SSD or Standard Attention
         x = self.attn(x, H, W)
         x = shortcut + self.drop_path(x)
-        x = x + self.cpe2(x.reshape(B, H, W, C).permute(0, 3, 1, 2)).flatten(2).permute(
-            0, 2, 1
-        )
+        x = x + self.cpe2(x.reshape(B, H, W, C).permute(0, 3, 1, 2)).flatten(2).permute(0, 2, 1)
 
         # FFN
         x = x + self.drop_path(self.mlp(self.norm2(x)))
@@ -514,7 +471,6 @@ class BasicLayer(nn.Module):
         d_state=64,
         **kwargs,
     ):
-
         super().__init__()
         self.dim = dim
         self.input_resolution = input_resolution
@@ -531,9 +487,7 @@ class BasicLayer(nn.Module):
                     mlp_ratio=mlp_ratio,
                     qkv_bias=qkv_bias,
                     drop=drop,
-                    drop_path=(
-                        drop_path[i] if isinstance(drop_path, list) else drop_path
-                    ),
+                    drop_path=(drop_path[i] if isinstance(drop_path, list) else drop_path),
                     norm_layer=norm_layer,
                     ssd_expansion=ssd_expansion,
                     ssd_ngroups=ssd_ngroups,
@@ -598,9 +552,7 @@ class VMAMBA2(nn.Module):
 
         self.simple_downsample = kwargs.get("simple_downsample", False)
         self.simple_patch_embed = kwargs.get("simple_patch_embed", False)
-        self.attn_types = kwargs.get(
-            "attn_types", ["mamba2", "mamba2", "mamba2", "standard"]
-        )
+        self.attn_types = kwargs.get("attn_types", ["mamba2", "mamba2", "mamba2", "standard"])
         if self.simple_patch_embed:
             self.patch_embed = SimpleStem(
                 img_size=img_size,
@@ -626,9 +578,7 @@ class VMAMBA2(nn.Module):
         self.pos_drop = nn.Dropout(p=drop_rate)
 
         # stochastic depth
-        dpr = [
-            x.item() for x in torch.linspace(0, drop_path_rate, sum(depths))
-        ]  # stochastic depth decay rule
+        dpr = [x.item() for x in torch.linspace(0, drop_path_rate, sum(depths))]  # stochastic depth decay rule
 
         # build layers
         self.layers = nn.ModuleList()
@@ -647,9 +597,7 @@ class VMAMBA2(nn.Module):
                 drop=drop_rate,
                 drop_path=dpr[sum(depths[:i_layer]) : sum(depths[: i_layer + 1])],
                 norm_layer=norm_layer,
-                downsample=(
-                    PatchMergingBlock if (i_layer < self.num_layers - 1) else None
-                ),
+                downsample=(PatchMergingBlock if (i_layer < self.num_layers - 1) else None),
                 use_checkpoint=use_checkpoint,
                 ssd_expansion=ssd_expansion,
                 ssd_ngroups=ssd_ngroups,
@@ -662,11 +610,7 @@ class VMAMBA2(nn.Module):
 
         self.norm = norm_layer(self.num_features)
         self.avgpool = nn.AdaptiveAvgPool1d(1)
-        self.head = (
-            nn.Linear(self.num_features, num_classes)
-            if num_classes > 0
-            else nn.Identity()
-        )
+        self.head = nn.Linear(self.num_features, num_classes) if num_classes > 0 else nn.Identity()
 
         self.apply(self._init_weights)
 
@@ -699,9 +643,7 @@ class VMAMBA2(nn.Module):
         input = torch.randn((1, *shape), device=next(model.parameters()).device)
         params = parameter_count(model)[""]
         try:
-            Gflops, unsupported = flop_count(
-                model=model, inputs=(input,), supported_ops=supported_ops
-            )
+            Gflops, unsupported = flop_count(model=model, inputs=(input,), supported_ops=supported_ops)
         except Exception as e:
             print("get exception", e)
             print("Error in flop_count, set to default value 1e9")
@@ -760,7 +702,6 @@ class Backbone_VMAMBA2(VMAMBA2):
             print(f"Failed loading checkpoint form {ckpt}: {e}")
 
     def forward(self, x):
-
         def layer_forward(l, x, H=None, W=None):
             for blk in l.blocks:
                 x = blk(x, H, W)

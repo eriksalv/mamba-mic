@@ -2,10 +2,10 @@ wandb:
   project: brats2024
   name: example
   watch_model: false
-  notes: null
+  group: null
 trainer:
-  max_epochs: 500
-  devices: 1
+  max_epochs: 150
+  devices: auto
   accelerator: auto
   # max_time: 00:12:00:00
   precision: 32
@@ -29,9 +29,9 @@ trainer:
 optimizer:
   class_path: torch.optim.AdamW
   init_args:
-    lr: 0.0001
+    lr: 0.0004
 lr_scheduler:
   class_path: torch.optim.lr_scheduler.CosineAnnealingLR
   init_args:
-    T_max: 500
-    eta_min: 0.000001
+    T_max: 150
+    eta_min: 0.00004
