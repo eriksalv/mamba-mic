@@ -9,6 +9,7 @@ import numpy as np
 import PIL
 from PIL.Image import Resampling
 import torch
+from functools import reduce
 from mamba_mic.data_modules.util.kfold import kfold
 from mamba_mic.data_modules.util.select_random_slice import SelectRandomSliced
 
@@ -21,6 +22,7 @@ class CAMUSDataModule(pl.LightningDataModule):
         cv_folds=10,
         fold_index=0,
         views=["2CH", "4CH"],
+        binary_lv=True,
         num_train_subjects=None,
         filter_poor_image_quality=False,
         num_workers=4,
@@ -41,6 +43,7 @@ class CAMUSDataModule(pl.LightningDataModule):
         self.filter_poor_image_quality = filter_poor_image_quality
         self.name = name
         self.views = views
+        self.binary_lv = binary_lv
 
         default_preprocess = T.Compose(
             [
@@ -53,7 +56,9 @@ class CAMUSDataModule(pl.LightningDataModule):
                 # Select a random slice from the time dimension
                 T.Resized(keys=["image", "label"], spatial_size=img_size, mode=("area", "nearest")),
                 T.Lambdad(keys=["label"], func=lambda x: x.unsqueeze(0)),
-                T.AsDiscreted(keys=["label"], to_onehot=4),
+                T.AsDiscreted(keys=["label"], to_onehot=4)
+                if not self.binary_lv
+                else T.Lambdad(keys=["label"], func=lambda x: (x == 1).float()),
                 T.Lambdad(keys=["label"], func=lambda x: x.permute(1, 0, 2, 3)),
             ]
         )
@@ -102,20 +107,27 @@ class CAMUSDataModule(pl.LightningDataModule):
     def prepare_data(self):
         patient_ids = list(range(1, 501))
         patient_folders = [Path(self.data_dir) / f"patient{patient_id:04d}" for patient_id in patient_ids]
-        self.subjects = [
-            {
-                # Full sequences
-                "image": patient_folder / f"patient{patient_id:04d}_{view}_half_sequence.nii.gz",
-                "label": patient_folder / f"patient{patient_id:04d}_{view}_half_sequence_gt.nii.gz",
-                # Info cfg files
-                "image_meta_dict": load_meta(patient_folder, view),
-            }
-            for patient_folder, patient_id in zip(patient_folders, patient_ids)
+        self.subjects = {
+            view: [
+                {
+                    # Full sequences
+                    "image": patient_folder / f"patient{patient_id:04d}_{view}_half_sequence.nii.gz",
+                    "label": patient_folder / f"patient{patient_id:04d}_{view}_half_sequence_gt.nii.gz",
+                    # Info cfg files
+                    "image_meta_dict": load_meta(patient_folder, view),
+                }
+                for patient_folder, patient_id in zip(patient_folders, patient_ids)
+            ]
             for view in self.views
-        ]
+        }
 
     def setup(self, stage=None):
-        train_subjects, test_subjects = kfold(self.subjects, self.cv_folds, shuffle=True, seed=42)[self.fold_index]
+        # Make sure both views are contained for each subject in validation set
+        subjects = [
+            kfold(self.subjects[view], self.cv_folds, shuffle=True, seed=42)[self.fold_index] for view in self.views
+        ]
+        train_subjects = reduce(lambda acc, view: acc + view[0], subjects, [])
+        test_subjects = reduce(lambda acc, view: acc + view[1], subjects, [])
 
         if self.num_train_subjects:
             assert len(train_subjects) >= self.num_train_subjects, (

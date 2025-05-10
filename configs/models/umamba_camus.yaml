@@ -1,13 +1,13 @@
 class_path: mamba_mic.camus_module.System
 init_args:
-  include_background: false
-  softmax: true
-  num_output_channels: 4
+  # include_background: false
+  # softmax: true
+  # num_output_channels: 4
   criterion:
     class_path: monai.losses.DiceCELoss
     init_args:
-      include_background: false
-      softmax: true
+      include_background: true
+      sigmoid: true
   net:
     class_path: mamba_mic.models.umamba.UMambaEnc
     init_args: 
@@ -30,5 +30,5 @@ init_args:
       - [2, 2]
       - [2, 2]
       n_conv_per_stage: [2, 2, 2, 2, 2, 2]
-      num_classes: 4
+      num_classes: 1
       n_conv_per_stage_decoder: [2, 2, 2, 2, 2]
