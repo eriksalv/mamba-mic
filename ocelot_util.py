@@ -1,4 +1,7 @@
 import torch
+import torch.nn as nn
+import torch.nn.functional as F
+from monai.losses import MaskedDiceLoss
 from skimage.feature import peak_local_max
 import numpy as np
 import pandas as pd
@@ -252,3 +255,33 @@ def weighted_mse_loss(pred, target, class_weights):
     weighted_mse = mse_per_channel * class_weights.view(3, 1, 1)
 
     return weighted_mse.mean()
+
+class MaskedBCEAndDiceLoss(nn.Module):
+    def __init__(
+        self,
+        dice_kwargs=None,
+        bce_weight: float = 0.5,
+        dice_weight: float = 0.5,
+    ):
+        super().__init__()
+        self.dice_loss = MaskedDiceLoss(**(dice_kwargs or {}))
+        self.bce_weight = bce_weight
+        self.dice_weight = dice_weight
+
+    def forward(self, input, target, mask=None):
+        """
+        input: raw logits, shape [B, 1, H, W]
+        target: binary labels, shape [B, 1, H, W]
+        mask: binary mask, shape [B, 1, H, W]
+        """
+        probs = torch.sigmoid(input)
+
+        if mask is not None:
+            bce_loss = F.binary_cross_entropy(probs, target, reduction='none')
+            bce_loss = (bce_loss * mask).sum() / (mask.sum() + 1e-8)
+        else:
+            bce_loss = F.binary_cross_entropy(probs, target, reduction='mean')
+        
+        dice_loss = self.dice_loss(probs, target, mask=mask)
+
+        return self.bce_weight * bce_loss + self.dice_weight * dice_loss

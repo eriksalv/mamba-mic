@@ -16,8 +16,10 @@ from ocelot_util import (
     load_ground_truth,
     compute_class_weights,
     weighted_mse_loss,
+    MaskedBCEAndDiceLoss,
 )
 
+import random
 
 class System(pl.LightningModule):
     def __init__(
@@ -37,6 +39,10 @@ class System(pl.LightningModule):
         save_output=False,
         is_ocelot = False,
         tissue_only = False,
+        is_pretrained = False,
+        use_mse = False,
+        masked_loss = False,
+        prob_custom_label = 1.1
     ) -> None:
         super().__init__()
         self.net = net
@@ -48,7 +54,10 @@ class System(pl.LightningModule):
         self.use_focal = use_focal
         self.is_ocelot = is_ocelot
         self.tissue_only = tissue_only
-
+        self.is_pretrained = is_pretrained
+        self.use_mse = use_mse
+        self.masked_loss = masked_loss
+        self.prob_custom_label = prob_custom_label
         assert (num_output_channels is None and softmax is False) or (
             num_output_channels is not None and softmax is True
         ), "num_output_channels should only be set if softmax is True"
@@ -69,13 +78,14 @@ class System(pl.LightningModule):
         
         if self.is_ocelot:
             self.tissue_criterion = DiceCELoss(
-            include_background=include_background,
+            include_background=True,
             sigmoid=True,
             softmax=False,
             squared_pred=True,
             )
+            self.masked_criterion = MaskedBCEAndDiceLoss()
             self.tissue_metrics = {
-            "dice": DiceMetric(include_background=include_background, reduction="mean_batch"),
+            "dice": DiceMetric(include_background=True, reduction="mean_batch"),
             "hd95": HausdorffDistanceMetric(
                 include_background=include_background,
                 distance_metric="euclidean",
@@ -83,8 +93,15 @@ class System(pl.LightningModule):
                 reduction="mean_batch",
             ),
             }
-
-            #self.cell_criterion = torch.nn.MSELoss()
+            self.masked_metrics = {
+            "dice_masked": DiceMetric(include_background=True, reduction="mean_batch"),
+            "hd95_masked": HausdorffDistanceMetric(
+                include_background=include_background,
+                distance_metric="euclidean",
+                percentile=95,
+                reduction="mean_batch",
+            ),
+            }
             self.cell_criterion = DiceCELoss(
             include_background=include_background,
             sigmoid=False,
@@ -161,7 +178,13 @@ class System(pl.LightningModule):
 
         if self.is_ocelot:
             y_t = batch["label_tissue"]
-            cropped_label = batch["label_cropped_tissue"]
+
+            if not val:
+                if random.random() < self.prob_custom_label:
+                    cropped_label = batch["custom_label"]
+                else:
+                    cropped_label = batch["label_cropped_tissue"]
+    
             y_c = batch['soft_is_mask']
             meta_batch = batch["meta"]
         
@@ -195,20 +218,28 @@ class System(pl.LightningModule):
         if self.is_ocelot:
             if self.tissue_only:
                 y_t_hat, y_t = self.infer_batch(batch)
-                tissue_loss = self.tissue_criterion(y_t_hat, y_t)
+                if isinstance(batch, list):
+                    batch = batch[0]
+                mask = batch["unknown_mask"]
+                if self.masked_loss:
+                    tissue_loss = self.masked_criterion(y_t_hat, y_t, mask = mask)
+                else:
+                    tissue_loss = self.tissue_criterion(y_t_hat, y_t)
                 self.log("train_tissue_loss", tissue_loss, prog_bar=True)
                 return tissue_loss
 
             y_t_hat, y_c_hat, y_t, y_c = self.infer_batch(batch)
             tissue_loss = self.tissue_criterion(y_t_hat, y_t)
-            # Compute class weights per batch for cell segmentation
-            #class_weights = compute_class_weights(y_c)  # Compute per batch
-            #cell_loss = weighted_mse_loss(y_c_hat, y_c, class_weights)  # Apply weighted MS
-            cell_loss = self.cell_criterion(y_c_hat, y_c)
+
+            if self.use_mse:
+                class_weights = compute_class_weights(y_c)  # Compute per batch
+                cell_loss = weighted_mse_loss(y_c_hat, y_c, class_weights)  # Apply weighted MS
+            else:
+                cell_loss = self.cell_criterion(y_c_hat, y_c)
             total_loss = tissue_loss + cell_loss
             self.log("train_cell_loss", cell_loss, prog_bar=True)
 
-            if not self.net.is_pretrained:
+            if not self.is_pretrained:
                 self.log("train_tissue_loss", tissue_loss, prog_bar=True)
                 return total_loss
 
@@ -229,13 +260,28 @@ class System(pl.LightningModule):
                 y_t_hat, y_t = self.infer_batch(batch, val=True)
             else:
                 y_t_hat, y_c_hat, y_t, y_c = self.infer_batch(batch, val=True)
+            if isinstance(batch, list):
+                batch = batch[0]
+            mask = batch["unknown_mask"]
+#
+            # Masking should happen after sigmoid and thresholding
+            y_t_hat_binarized = self.post_pred(y_t_hat)  # Apply the thresholding on the logits
+          
 
-            y_t_hat_binarized = self.post_pred(y_t_hat)
-            tissue_loss = self.tissue_criterion(y_t_hat, y_t)
+            # Use the masked label to compute loss and metrics
+            #y_t_masked = y_t * mask  # Apply mask to ground truth labels as well
+            if self.masked_loss:
+                tissue_loss = self.masked_criterion(y_t_hat, y_t, mask = mask)
+            else:
+                tissue_loss = self.tissue_criterion(y_t_hat, y_t)
 
             if self.tissue_only:
                 for name, metric in self.tissue_metrics.items():
                     metric(y_t_hat_binarized, y_t)
+
+                y_t_hat_masked_binarized = y_t_hat_binarized * mask
+                for name, metric in self.masked_metrics.items():
+                    metric(y_t_hat_masked_binarized, y_t)
                 return tissue_loss
 
             #class_weights = compute_class_weights(y_c)  
@@ -265,7 +311,7 @@ class System(pl.LightningModule):
 
             
 
-            if not self.net.is_pretrained:
+            if not self.is_pretrained:
                 for name, metric in self.tissue_metrics.items():
                     metric(y_t_hat_binarized, y_t)
 
@@ -303,7 +349,7 @@ class System(pl.LightningModule):
 
             loss, tissue_loss, cell_loss = self._shared_eval_step(batch, batch_idx)
             self.log("val_loss", cell_loss, sync_dist=True)
-            if not self.net.is_pretrained:
+            if not self.is_pretrained:
                 self.log("val_tissue_loss", tissue_loss, sync_dist=True)
             self.log("val_cell_loss", cell_loss, sync_dist=True)
 
@@ -314,6 +360,19 @@ class System(pl.LightningModule):
             return {"val_loss": loss}
 
     def test_step(self, batch, batch_idx):
+        if self.is_ocelot:
+            if self.tissue_only:
+                tissue_loss = self._shared_eval_step(batch, batch_idx)
+                self.log("test_loss", tissue_loss, sync_dist=True)
+                return {"test_loss": tissue_loss}
+                
+            loss, tissue_loss, cell_loss = self._shared_eval_step(batch, batch_idx)
+            self.log("test_loss", cell_loss, sync_dist=True)
+            self.log("test_tissue_loss", tissue_loss, sync_dist=True)
+            self.log("test_cell_loss", cell_loss, sync_dist=True)
+
+            return {"test_loss": cell_loss}
+            
         loss = self._shared_eval_step(batch, batch_idx)
         self.log("test_loss", loss, sync_dist=True)
         return {"test_loss": loss}
@@ -322,7 +381,7 @@ class System(pl.LightningModule):
         metrics = {}
 
         if self.is_ocelot:
-            if not self.net.is_pretrained:
+            if not self.is_pretrained:
                 for name, metric in self.tissue_metrics.items():
                     per_channel = metric.aggregate()
                     if name == "confusion_matrix":
@@ -334,6 +393,13 @@ class System(pl.LightningModule):
                             metrics[f"tissue_channel{i}/{stage}_{name}"] = per_channel[i]
                         metrics[f"{stage}_tissue_{name}"] = per_channel.mean()
                         metric.reset()
+
+                for name, metric in self.masked_metrics.items():
+                    per_channel = metric.aggregate()
+                    for i in range(len(per_channel)):
+                        metrics[f"tissue_channel{i}/{stage}_{name}"] = per_channel[i]
+                    metrics[f"{stage}_tissue_{name}"] = per_channel.mean()
+                    metric.reset()
 
             if not self.tissue_only:
                 precision_bc, recall_bc, f1_bc = calculate_metrics(self.tp_bc_count, self.fp_bc_count, self.fn_bc_count)

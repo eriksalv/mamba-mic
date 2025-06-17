@@ -5,7 +5,7 @@ import monai.transforms as T
 from monai.inferers import SlidingWindowInferer
 
 class CompositeSegmentationModel(nn.Module):
-    def __init__(self, cs_net, ts_net = None, ts_pretrained_path: str = None, device='cuda'):  
+    def __init__(self, cs_net, ts_net = None, ts_pretrained_path: str = None, device='cuda', ts_patch_size = 896, cs_patch_size = 896):  
         super(CompositeSegmentationModel, self).__init__()
         assert (ts_net and not ts_pretrained_path) or (
             not ts_net and ts_pretrained_path
@@ -20,6 +20,8 @@ class CompositeSegmentationModel(nn.Module):
         if device is not None:
             self.device = device  # Store device
             self.to(self.device)
+        self.ts_patch_size = ts_patch_size
+        self.cs_patch_size = cs_patch_size
 
         self.post_process_tissue = T.Compose(
                 [
@@ -27,10 +29,10 @@ class CompositeSegmentationModel(nn.Module):
                     T.AsDiscrete(threshold=0.5),
                 ]
             )
-        self.tissue_inferer = SlidingWindowInferer(roi_size=(512, 512),
-         overlap=0.5, sw_batch_size= 4, mode= "gaussian")
-        self.cell_inferer = SlidingWindowInferer(roi_size=(512, 512),
-         overlap=0.5, sw_batch_size = 4, mode= "gaussian")
+        self.tissue_inferer = SlidingWindowInferer(roi_size=(self.ts_patch_size, self.ts_patch_size),
+         overlap=0.5, sw_batch_size= 1, mode= "gaussian")
+        self.cell_inferer = SlidingWindowInferer(roi_size=(self.cs_patch_size, self.cs_patch_size),
+         overlap=0.5, sw_batch_size = 1, mode= "gaussian")
 
     def forward(self, batch, crop_coords = None,
      tissue_label = None, cell_tissue_label=None,

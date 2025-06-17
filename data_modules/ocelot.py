@@ -11,7 +11,8 @@ from PIL import Image, ImageOps
 from monai.data import MetaTensor
 import pandas as pd
 from scipy.ndimage import gaussian_filter
-
+import scipy.ndimage as ndi
+from data_modules.util.kfold import kfold
 
 class OcelotDataModule(pl.LightningDataModule):
     def __init__(
@@ -19,62 +20,100 @@ class OcelotDataModule(pl.LightningDataModule):
         batch_size: int,
         image_dir="/cluster/projects/vc/data/mic/open/OCELOT/ocelot_data/images",
         label_dir="/cluster/projects/vc/data/mic/open/OCELOT/ocelot_data/annotations",
+        custom_label_dir = "/cluster/home/jespee/mamba-mic/data/ocelot_tissue/training_cropped_labels",
         metadata_path="/cluster/projects/vc/data/mic/open/OCELOT/ocelot_data/metadata.json",
         num_workers=4,
         cache_rate=0.0,
         preprocess=None,
         augment=None,
+        ts_patch_size = 896,
+        cs_patch_size = 896,
+        cv_folds = None,
+        fold_index = None,
         name="ocelot"
     ):
         super().__init__()
         self.image_dir = image_dir
         self.label_dir = label_dir
+        self.custom_label_dir = custom_label_dir
         self.batch_size = batch_size
         self.num_workers = num_workers
         self.cache_rate = cache_rate
         self.name = name
         self.metadata = load_metadata(metadata_path)
-
+        self.ts_patch_size = ts_patch_size
+        self.cs_patch_size = cs_patch_size
         
-      
+        self.cv_folds = cv_folds
+        self.fold_index = fold_index
+        assert self.cv_folds is None or self.fold_index is not None, "If cv_folds is given, fold_index must not be None"
+
         default_preprocess = T.Compose([
+            CorrectOrientationd(
+                keys=["img_tissue", "img_cell", "label_tissue", "label_cropped_tissue", "custom_label"],
+                label_keys=["label_tissue", "custom_label"]
+            ),
+            #T.LoadImaged(keys=["img_tissue", "img_cell", "label_tissue", "label_cropped_tissue"]),
+            #T.EnsureChannelFirstd(keys = ["img_tissue", "img_cell", "label_tissue", "label_cropped_tissue"]),
+            CreateUNKMask(keys = ["label_tissue"]),
+            T.Lambdad(keys=["label_tissue"], func=onehot_tissue_label),
+            T.Lambdad(keys=["label_tissue", "label_cropped_tissue"], func=exclude_bg),
+            T.NormalizeIntensityd(keys=["img_tissue", "img_cell"]),
+            SoftISMaskd(keys=["label_cell"]), 
+            T.ToTensord(keys=["img_tissue", "img_cell", "label_tissue", "label_cropped_tissue", "soft_is_mask", "unknown_mask", "custom_label"])
+        ])
+        self.val_preprocess = T.Compose([
             CorrectOrientationd(
                 keys=["img_tissue", "img_cell", "label_tissue", "label_cropped_tissue"],
                 label_keys=["label_tissue"]
             ),
             #T.LoadImaged(keys=["img_tissue", "img_cell", "label_tissue", "label_cropped_tissue"]),
             #T.EnsureChannelFirstd(keys = ["img_tissue", "img_cell", "label_tissue", "label_cropped_tissue"]),
+            CreateUNKMask(keys = ["label_tissue"]),
             T.Lambdad(keys=["label_tissue"], func=onehot_tissue_label),
             T.Lambdad(keys=["label_tissue", "label_cropped_tissue"], func=exclude_bg),
             T.NormalizeIntensityd(keys=["img_tissue", "img_cell"]),
             SoftISMaskd(keys=["label_cell"]), 
-            T.ToTensord(keys=["img_tissue", "img_cell", "label_tissue", "label_cropped_tissue", "soft_is_mask"])
+            T.ToTensord(keys=["img_tissue", "img_cell", "label_tissue", "label_cropped_tissue", "soft_is_mask", "unknown_mask",])
         ])
-       
         self.preprocess = preprocess if preprocess is not None else default_preprocess
 
-        
+
         self.augment = (
             augment
             if augment is not None
             else T.Compose(
-                        [   T.RandSpatialCropd(keys=["img_tissue", "img_cell", "label_tissue", "label_cropped_tissue",
-                                 "soft_is_mask"], roi_size=(512, 512)),
+                        [   T.RandCropByLabelClassesd(
+                                keys=["label_cropped_tissue", "img_cell",  "soft_is_mask", "custom_label"],
+                                label_key="soft_is_mask",
+                                spatial_size=[self.cs_patch_size, self.cs_patch_size],
+                                num_classes=3,
+                                num_samples=1,
+                                ratios=[0.1, 1, 1],
+                            ),
+                            T.RandSpatialCropd(keys=["img_tissue", "label_tissue", "unknown_mask"],
+                             roi_size=(self.ts_patch_size, self.ts_patch_size)),
                             T.RandZoomd(
                                 keys=["img_tissue", "img_cell", "label_tissue", "label_cropped_tissue",
-                                 "soft_is_mask"], prob=0.7, min_zoom=0.9, max_zoom=1.1
+                                 "soft_is_mask", "unknown_mask", "custom_label"], mode = "nearest", prob=0.7, min_zoom=0.9, max_zoom=1.1
                             ),  
                             T.RandFlipd(
                                 keys=["img_tissue", "img_cell", "label_tissue", "label_cropped_tissue",
-                                 "soft_is_mask"], prob=1, spatial_axis=[0, 1]
+                                 "soft_is_mask", "unknown_mask", "custom_label"], prob=1, spatial_axis=[0, 1]
                             ),  # Random flip (horizontal or vertical)
                             T.RandRotate90d(
                                 keys=["img_tissue", "img_cell", "label_tissue", "label_cropped_tissue",
-                                 "soft_is_mask"], prob=1
+                                 "soft_is_mask", "unknown_mask", "custom_label"], prob=1
                             ),  # Random rotation by 90°, 180°, or 270°
                             T.RandAdjustContrastd(
                                 keys=["img_tissue", "img_cell"], prob=0.7, gamma=(0.8, 1.2)
                             ),  # Random brightness and contrast adjustment
+                            #T.RandGaussianNoised(keys = ["img_tissue", "img_cell"], prob = 0.7, mean = 0, std = 0.1),
+                            #T.RandGaussianSmoothd(keys = ["img_tissue", "img_cell"], prob = 0.7),
+                            #RandomMorphologyd(keys=["label_cropped_tissue"], prob=0.7, mode="erode", iterations=3),
+                            #RandomMorphologyd(keys=["label_cropped_tissue"], prob=0.7, mode="dilate", iterations=3),
+                            #T.RandCoarseDropoutd(keys = "label_cropped_tissue", holes = 30, prob = 0.7, spatial_size=12, fill_value=0),
+                            #T.RandCoarseDropoutd(keys = "label_cropped_tissue", holes = 10, prob = 0.7, spatial_size=12, fill_value=1),
                         ]
                     )
         )
@@ -142,15 +181,16 @@ class OcelotDataModule(pl.LightningDataModule):
         label_cropped_tissues = sorted(glob(os.path.join(self.label_dir, split, "cropped_tissue", "*.png")))
         #label_cell_masks = sorted(glob(os.path.join(self.label_dir, split, "cell_mask_images", "*.png")))
         label_cells = sorted(glob(os.path.join(self.label_dir, split, "cell", "*.csv")))
+        num_samples = len(img_tissues)
 
-        # Check if all lists have the same length
-        #list_lengths = [len(img_tissues), len(img_cells), len(label_tissues), len(label_cropped_tissues), len(label_cell_masks), len(label_cells)]
-        #if len(set(list_lengths)) > 1:
-        #    raise ValueError(f"Mismatch in file counts: {dict(zip(['img_tissues', 'img_cells', 'label_tissues', 'label_cropped_tissues', 'label_cell_masks', 'label_cells'], list_lengths))}")
-
+        if split == "train":
+            custom_labels = sorted(glob(os.path.join(self.custom_label_dir, "*.png")))
+            assert len(custom_labels) == num_samples, "Mismatch in number of custom labels and images"
+        else:
+            custom_labels = [0] * num_samples
         # Extract metadata per sample
         pairs = []
-        for i_t, i_c, l_t, l_ct, l_c in zip(img_tissues, img_cells, label_tissues, label_cropped_tissues, label_cells):
+        for i_t, i_c, l_t, l_ct, l_c, cl_c in zip(img_tissues, img_cells, label_tissues, label_cropped_tissues, label_cells, custom_labels):
             sample_id = os.path.basename(i_t).split(".")[0]  # Extract sample ID from filename
             if sample_id in self.metadata:
                 meta = self.metadata[sample_id]
@@ -161,6 +201,7 @@ class OcelotDataModule(pl.LightningDataModule):
                     "label_cropped_tissue": l_ct,
                     #"label_cell_mask": l_cm,
                     "label_cell": l_c,
+                    "custom_label": cl_c,
                     "meta": meta  # Attach metadata for cropping & alignment
                 })
             else:
@@ -174,6 +215,8 @@ class OcelotDataModule(pl.LightningDataModule):
         self.val_files = self.collect_pairs_with_metadata('val')
         self.test_files = self.collect_pairs_with_metadata('test')  
 
+        if self.cv_folds:
+            self.train_files, self.val_files = kfold(self.train_files, self.cv_folds, shuffle=True, seed=42)[self.fold_index]
         print(f"Train: {len(self.train_files)} | Val: {len(self.val_files)} | Test: {len(self.test_files)}")
    
 
@@ -189,7 +232,7 @@ class OcelotDataModule(pl.LightningDataModule):
             )
             self.val_set = CacheDataset(
                 self.val_files,
-                transform=self.preprocess,
+                transform=self.val_preprocess,
                 cache_rate=0.0,
             )
 
@@ -197,7 +240,7 @@ class OcelotDataModule(pl.LightningDataModule):
         if stage == "test" or stage is None:
             self.test_set = CacheDataset(
                 self.test_files,
-                transform=self.preprocess,
+                transform=self.val_preprocess,
                 cache_rate=0.0,
             )
 
@@ -249,6 +292,7 @@ def load_metadata(metadata_path):
     metadata_dict = {}
     for sample_id, data in sample_pairs.items():
         metadata_dict[sample_id] = {
+            "sample_id" : sample_id,
             "slide_name": data["slide_name"],
             "cell_patch": {
                 "x_start": data["cell"]["x_start"],
@@ -411,8 +455,8 @@ class SoftISMaskd(T.MapTransform):
                     tumor_mask[mask] = 1
 
         
-        tumor_mask = gaussian_filter(tumor_mask, sigma=self.sigma)
-        background_cell_mask = gaussian_filter(background_cell_mask, sigma=self.sigma)
+        #tumor_mask = gaussian_filter(tumor_mask, sigma=self.sigma)
+        #background_cell_mask = gaussian_filter(background_cell_mask, sigma=self.sigma)
 
         total_fg = tumor_mask + background_cell_mask
         background_mask = 1 - np.clip(total_fg, 0, 1)  
@@ -421,4 +465,43 @@ class SoftISMaskd(T.MapTransform):
 
         # Convert to PyTorch tensor
         d["soft_is_mask"] = torch.tensor(soft_is_mask, dtype=torch.float32)
+        return d
+
+class RandomMorphologyd(T.MapTransform):
+    def __init__(self, keys, prob=0.5, mode="erode", iterations=1):
+        super().__init__(keys)
+        self.prob = prob
+        self.mode = mode
+        self.iterations = iterations
+
+    def __call__(self, data):
+        for key in self.keys:
+            if np.random.rand() < self.prob:
+                label = data[key]
+                label_np = label.cpu().numpy() if isinstance(label, torch.Tensor) else label
+
+                eroded_label_np = label_np.copy()
+
+                for c in range(eroded_label_np.shape[0]):  # Apply per channel
+                    op = ndi.binary_erosion if self.mode == "erode" else ndi.binary_dilation
+                    eroded_label_np[c] = op(eroded_label_np[c], iterations=self.iterations).astype(eroded_label_np.dtype)
+                    
+                # Store the eroded version separately
+                data[key] = torch.from_numpy(eroded_label_np).to(label.device if isinstance(label, torch.Tensor) else "cpu")
+        
+        return data
+
+class CreateUNKMask(T.MapTransform):
+    def __init__(self, keys):
+        super().__init__(keys)
+
+    def __call__(self, data):
+        d = dict(data)
+        for key in self.keys:
+            label = d[key]
+            if isinstance(label, torch.Tensor):
+                mask = ((label == 1) | (label == 2)).float()
+            else:
+                mask = (((label == 1) | (label == 2)).astype("float32"))
+            d["unknown_mask"] = mask
         return d
