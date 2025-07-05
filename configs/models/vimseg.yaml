@@ -1,4 +1,4 @@
-  class_path: models.vimseg.VimSegModel
+  class_path: mamba_mic.models.vimseg.VimSegModel
   init_args:
      vimseg:
       init_args:

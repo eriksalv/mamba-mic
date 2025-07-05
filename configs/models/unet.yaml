@@ -1,4 +1,4 @@
-class_path: models.unet.UNetModel
+class_path: mamba_mic.models.unet.UNetModel
 init_args:
   unet:
     class_path: monai.networks.nets.unet.UNet

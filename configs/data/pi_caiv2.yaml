@@ -1,3 +1,150 @@
-class_path: data_modules.pi_caiv2.PICAIV2DataModule
+class_path: mamba_mic.data_modules.pi_caiv2.PICAIV2DataModule
 init_args:
-  batch_size: 3
+  batch_size: 4
+  num_workers: 20
+  cache_rate: 1
+  filter_empty_labels_for_training: false
+  include_empty_eval: true
+  preprocess:
+    class_path: monai.transforms.Compose
+    init_args:
+      transforms:
+        - class_path: monai.transforms.LoadImaged
+          init_args:
+            keys: ["t2w", "adc", "hbv", "label"]
+        - class_path: monai.transforms.EnsureChannelFirstd
+          init_args:
+            keys: ["t2w", "adc", "hbv", "label"]
+        - class_path: monai.transforms.ResampleToMatchd
+          init_args:
+            keys: ["adc", "hbv"]
+            key_dst: t2w
+            mode: bilinear
+            padding_mode: border
+        - class_path: monai.transforms.ConcatItemsd
+          init_args:
+            keys: ["t2w", "adc", "hbv"]
+            name: image
+        - class_path: monai.transforms.SelectItemsd
+          init_args:
+            keys: ["image", "label"]
+        - class_path: monai.transforms.Orientationd
+          init_args:
+            keys: ["image", "label"]
+            axcodes: RAS
+        - class_path: monai.transforms.Spacingd
+          init_args:
+            keys: ["image", "label"]
+            pixdim: [0.5, 0.5, 3]
+            mode: ["bilinear", "nearest"]
+        - class_path: monai.transforms.CropForegroundd
+          init_args:
+            keys: ["image", "label"]
+            source_key: image
+            channel_indices: 0
+            allow_smaller: false
+        - class_path: monai.transforms.CenterSpatialCropd
+          init_args:
+            keys: ["image", "label"]
+            roi_size: [384, 384, 24]
+        - class_path: monai.transforms.Resized
+          init_args:
+            keys: ["image", "label"]
+            spatial_size: [384, 384, 24]
+            mode: ["area", "nearest"]
+        - class_path: monai.transforms.ClipIntensityPercentilesd
+          init_args:
+            keys: image
+            lower: null
+            upper: 98
+            channel_wise: true
+        - class_path: monai.transforms.NormalizeIntensityd
+          init_args:
+            keys: image
+            channel_wise: true
+        - class_path: mamba_mic.data_modules.pi_cai.ConvertToBinaryLabeld
+          init_args:
+            keys: label
+        # - class_path: mamba_mic.data_modules.util.slice_inference.ConcatAdjacentSlicesToChannelsd
+        #   init_args:
+        #     keys: image
+        #     n_adjacent_slices: 1
+  augment:
+    class_path: monai.transforms.Compose
+    init_args:
+      transforms:
+        - class_path: monai.transforms.RandFlipd
+          init_args:
+            keys: ["image", "label"]
+            prob: 0.5
+            spatial_axis: 0
+        - class_path: monai.transforms.RandFlipd
+          init_args:
+            keys: ["image", "label"]
+            prob: 0.5
+            spatial_axis: 1
+        - class_path: monai.transforms.RandFlipd
+          init_args:
+            keys: ["image", "label"]
+            prob: 0.5
+            spatial_axis: 2
+        - class_path: monai.transforms.Rand3DElasticd
+          init_args:
+            keys: ["image", "label"]
+            prob: 0.6
+            magnitude_range: [50, 80]
+            sigma_range: [5, 7]
+            mode: ["bilinear", "nearest"]
+        - class_path: monai.transforms.RandRotate90d
+          init_args:
+            keys: ["image", "label"]
+            prob: 0.67
+            max_k: 3
+            spatial_axes: [0, 1]
+        - class_path: monai.transforms.RandRotated
+          init_args:
+            keys: ["image", "label"]
+            prob: 0.5
+            range_x: [-0.2, 0.2]
+            range_y: [-0.2, 0.2]
+            range_z: [-0.2, 0.2]
+            mode: ["bilinear", "nearest"]
+        - class_path: monai.transforms.RandZoomd
+          init_args:
+            keys: ["image", "label"]
+            prob: 0.5
+            min_zoom: 0.9
+            max_zoom: 1.1
+            mode: ["area", "nearest"]
+            keep_size: true
+        - class_path: monai.transforms.RandCropByLabelClassesd
+          init_args:
+            keys: ["image", "label"]
+            label_key: label
+            spatial_size: [256, 256, 24]
+            num_classes: 2
+            num_samples: 1
+            ratios: [1, 1]
+        - class_path: monai.transforms.RandGaussianNoised
+          init_args:
+            keys: image
+            prob: 0.3
+            std: 0.1
+        - class_path: monai.transforms.RandAdjustContrastd
+          init_args:
+            keys: image
+            prob: 0.5
+            gamma: [0.7, 1.5]
+            retain_stats: true
+        - class_path: monai.transforms.RandScaleIntensityd
+          init_args:
+            keys: image
+            prob: 0.7
+            factors: 0.1
+            channel_wise: true
+        - class_path: monai.transforms.RandShiftIntensityd
+          init_args:
+            keys: image
+            prob: 0.7
+            offsets: 0.1
+            channel_wise: true

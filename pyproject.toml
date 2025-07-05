@@ -1,0 +1,17 @@
+[project]
+name = "mamba-mic"
+version = "0.1.0"
+description = "Exploring Mamba architectures for medical image segmentation."
+authors = [
+    {name = "Erik Salvesen"},
+    {name = "Jesper Elverum"}
+]
+requires-python = ">=3.11"
+
+[tool.setuptools]
+packages = ["mamba_mic"]
+
+[tool.ruff]
+line-length = 120
+src = ["mamba_mic"]
+target-version = "py311"

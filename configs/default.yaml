@@ -1,14 +1,16 @@
 wandb:
   project: brats2024
   name: example
+  watch_model: false
+  group: null
 trainer:
-  max_epochs: 500
+  max_epochs: 150
   devices: auto
   accelerator: auto
   # max_time: 00:12:00:00
   precision: 32
   log_every_n_steps: 5
-  check_val_every_n_epoch: 3
+  check_val_every_n_epoch: 5
   logger:
     - class_path: lightning.pytorch.loggers.WandbLogger
       init_args:
@@ -31,5 +33,5 @@ optimizer:
 lr_scheduler:
   class_path: torch.optim.lr_scheduler.CosineAnnealingLR
   init_args:
-    T_max: 500
-    eta_min: 0.000001
+    T_max: 150
+    eta_min: 0.00004

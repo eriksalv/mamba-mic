@@ -1,4 +1,4 @@
-class_path: system.System
+class_path: mamba_mic.system.System
 init_args:
   include_background: true
   do_slice_inference: true
@@ -6,14 +6,15 @@ init_args:
   slice_dim: 2
   slice_batch_size: 24
   net:
-    class_path: models.unet.UNet
+    class_path: mamba_mic.models.unet.UNet
     init_args: 
       encoder:
-        class_path: models.vssd.Backbone_VSSD
+        class_path: mamba_mic.models.vssd.Backbone_VSSD
         init_args:
           img_size: 384
           patch_size: 4
           num_classes: 1
+          in_chans: 9
           embed_dim: 64
           depths: [2, 4, 8, 4]
           num_heads: [2, 4, 8, 16]
@@ -22,7 +23,7 @@ init_args:
           drop_rate: 0.0
           drop_path_rate: 0.2
       decoder:
-        class_path: models.swin_umamba.UNetResDecoder
+        class_path: mamba_mic.models.swin_umamba.UNetResDecoder
         init_args:
           num_classes: 1
           deep_supervision: false

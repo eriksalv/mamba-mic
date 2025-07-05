@@ -1,0 +1,25 @@
+class_path: mamba_mic.camus_module.System
+init_args:
+  # include_background: false
+  # softmax: true
+  # num_output_channels: 4
+  criterion:
+    class_path: monai.losses.DiceCELoss
+    init_args:
+      include_background: true
+      sigmoid: true
+  net:
+    class_path: mamba_mic.models.swin_umamba.SwinUMambaD
+    init_args: 
+      vss_args:
+        in_chans: 1
+        patch_size: 4
+        depths: [2, 2, 4, 2]
+        dims: 48
+        drop_path_rate: 0.2
+      decoder_args:
+        num_classes: 1
+        deep_supervision: false
+        features_per_stage: [48, 96, 192, 384]
+        drop_path_rate: 0.2
+        d_state: 16

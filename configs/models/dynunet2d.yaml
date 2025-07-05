@@ -1,4 +1,4 @@
-class_path: system.System
+class_path: mamba_mic.system.System
 init_args:
   include_background: true
   do_slice_inference: true

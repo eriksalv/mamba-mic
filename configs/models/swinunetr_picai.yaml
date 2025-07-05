@@ -1,0 +1,22 @@
+class_path: mamba_mic.system.System
+init_args:
+  include_background: true
+  criterion:
+    class_path: monai.losses.FocalLoss
+    init_args:
+      gamma: 1.0
+  net:
+    class_path: monai.networks.nets.SwinUNETR
+    init_args:
+      img_size: [256, 256, 32]
+      in_channels: 3
+      out_channels: 1
+      feature_size: 48
+      depths: [2, 2, 4, 2]
+  val_inferer:
+    class_path: monai.inferers.SlidingWindowInferer
+    init_args:
+      roi_size: [256, 256, 32]
+      sw_batch_size: 4
+      overlap: 0.5
+      mode: gaussian

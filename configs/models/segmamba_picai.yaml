@@ -1,0 +1,18 @@
+class_path: mamba_mic.system.System
+init_args:
+  net:
+    class_path: mamba_mic.models.segmamba.SegMamba
+    init_args:
+      in_chans: 3
+      out_chans: 1
+      depths: [2, 2, 2, 2]
+      feat_size: [48, 96, 192, 384]
+      drop_path_rate: 0.2
+  val_inferer:
+    class_path: monai.inferers.SlidingWindowInferer
+    init_args:
+      roi_size: [256, 256, 32]
+      sw_batch_size: 4
+      overlap: 0.5
+      mode: gaussian
+     
