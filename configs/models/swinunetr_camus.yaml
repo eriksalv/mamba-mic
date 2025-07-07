@@ -1,4 +1,4 @@
-class_path: mamba_mic.camus_module.System
+class_path: mamba_mic.camus_module.CAMUSModule
 init_args:
   # include_background: false
   # softmax: true

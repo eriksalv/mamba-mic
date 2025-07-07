@@ -1,12 +1,13 @@
 #!/bin/sh
 #SBATCH --account=share-ie-idi          # E.g. "ie-idi" if you belong to IDI
-#SBATCH --job-name=camus
-#SBATCH --time=0-01:00:00         # format: D-HH:MM:SS
+#SBATCH --job-name=dynunet
+#SBATCH --time=2-00:00:00         # format: D-HH:MM:SS
 
 #SBATCH --partition=GPUQ          # Asking for a GPU
 #SBATCH --gres=gpu:1
-#SBATCH --mem=32G                 # Amount of memory
-#SBATCH --cpus-per-task=16         # Num. of CPU cores
+#SBATCH --constraint="gpu40g|gpu80g"
+#SBATCH --mem=128G                 # Amount of memory
+#SBATCH --cpus-per-task=16       # Num. of CPU cores
 #SBATCH --nodes=1                 # Num. of nodes
 #SBATCH --output=idun_logs/%j.txt       # Specifying 'stdout'
 #SBATCH --error=idun_logs/%j.err        # Specifying 'stderr'

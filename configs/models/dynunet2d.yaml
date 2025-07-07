@@ -4,12 +4,19 @@ init_args:
   do_slice_inference: true
   slice_shape: [384, 384]
   slice_dim: 2
-  slice_batch_size: 24
+  slice_batch_size: 21
+  criterion:
+    class_path: monai.losses.DiceFocalLoss
+    init_args:
+      sigmoid: true
+      squared_pred: true
+      include_background: true
+      gamma: 1
   net:
     class_path: monai.networks.nets.dynunet.DynUNet
     init_args:
       spatial_dims: 2
-      in_channels: 3
+      in_channels: 9
       out_channels: 1
       kernel_size:
         - - 3

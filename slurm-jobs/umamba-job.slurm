@@ -1,15 +1,15 @@
 #!/bin/sh
 #SBATCH --account=share-ie-idi       # E.g. "ie-idi" if you belong to IDI
-#SBATCH --job-name=swinumamba-camus
-#SBATCH --time=0-01:00:00         # format: D-HH:MM:SS
+#SBATCH --job-name=umamba
+#SBATCH --time=0-01:10:00         # format: D-HH:MM:SS
 #SBATCH --partition=GPUQ          # Asking for a GPU
-#SBATCH --gres=gpu:1             # Setting the number of GPUs to 1
+#SBATCH --gres=gpu:1
 #SBATCH --constraint="gpu80g|gpu40g"
 #SBATCH --cpus-per-task=16
-#SBATCH --mem=32G                 # Asking for 32GB RAM
+#SBATCH --mem=64G                 # Asking for 32GB RAM
 #SBATCH --nodes=1
-#SBATCH --output=idun_logs/%j.txt      # Specifying 'stdout'
-#SBATCH --error=idun_logs/%j.err        # Specifying 'stderr'
+#SBATCH --output=idun_logs/%j.txt
+#SBATCH --error=idun_logs/%j.err
 #SBATCH --mail-user=eriksalv@stud.ntnu.no
 #SBATCH --mail-type=ALL
 
@@ -29,5 +29,4 @@ module load GCCcore/11.3.0
 nvcc --version
 nvidia-smi
 
-# Run SegMamba
 srun $1

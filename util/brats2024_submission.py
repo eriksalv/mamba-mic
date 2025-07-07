@@ -8,7 +8,7 @@ from brats_2024_metrics.metrics_GLI import get_LesionWiseResults
 from lightning.pytorch import seed_everything
 from monai.inferers import sliding_window_inference
 
-from mamba_mic.system import System
+from mamba_mic.base_module import System
 from mamba_mic.data_modules.brats2024 import (
     BraTS2024DataModule,
 )

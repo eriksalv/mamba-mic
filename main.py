@@ -39,7 +39,9 @@ class MyLightningCLI(LightningCLI):
 
 
 class MySaveConfigCallback(SaveConfigCallback):
-    def save_config(self, trainer: pl.Trainer, pl_module: pl.LightningModule, stage: str) -> None:
+    def save_config(
+        self, trainer: pl.Trainer, pl_module: pl.LightningModule, stage: str
+    ) -> None:
         self.parser.save(
             self.config,
             "run_config.yaml",
@@ -51,7 +53,7 @@ class MySaveConfigCallback(SaveConfigCallback):
 
 
 def cli_main():
-    cli = MyLightningCLI(
+    cli = MyLightningCLI(  # noqa: F841
         parser_kwargs={
             "fit": {"default_config_files": ["configs/default.yaml"]},
             "validate": {"default_config_files": ["configs/default_eval.yaml"]},

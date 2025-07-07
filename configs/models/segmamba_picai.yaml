@@ -1,11 +1,15 @@
 class_path: mamba_mic.system.System
 init_args:
+  criterion:
+    class_path: monai.losses.FocalLoss
+    init_args:
+      gamma: 1.0
   net:
     class_path: mamba_mic.models.segmamba.SegMamba
     init_args:
       in_chans: 3
       out_chans: 1
-      depths: [2, 2, 2, 2]
+      depths: [2, 2, 4, 2]
       feat_size: [48, 96, 192, 384]
       drop_path_rate: 0.2
   val_inferer:
