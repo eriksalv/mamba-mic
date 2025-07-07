@@ -18,19 +18,17 @@ init_args:
           patch_size: 4
           num_classes: 1
           in_chans: 1
-          embed_dim: 48
-          depths: [2, 2, 4, 2]
-          num_heads: [6, 12, 24, 48]
-          mlp_ratio: 4.0
-          qkv_bias: true
-          drop_rate: 0.0
-          drop_path_rate: 0.2
+          embed_dim: 64
+          depths: [2, 4, 8, 4]
+          num_heads: [2, 4, 8, 16]
+          attn_types: ["mamba2", "mamba2", "mamba2", "mamba2"]
+          simple_patch_embed: true
       decoder:
         class_path: mamba_mic.models.swin_umamba.UNetResDecoder
         init_args:
           num_classes: 1
           deep_supervision: false
-          features_per_stage: [48, 96, 192, 384]
+          features_per_stage: [64, 128, 256, 512]
           drop_path_rate: 0.2
           d_state: 16
-     
+          patch_size: 4

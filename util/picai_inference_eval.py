@@ -14,7 +14,7 @@ from picai_eval import evaluate
 from scipy.ndimage import label
 from pathlib import Path
 
-from mamba_mic.system import System
+from mamba_mic.base_module import System
 from mamba_mic.data_modules.pi_caiv2 import PICAIV2DataModule
 
 

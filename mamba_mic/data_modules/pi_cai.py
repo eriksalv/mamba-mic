@@ -6,6 +6,7 @@ from glob import glob
 import os
 import torch
 import numpy as np
+from mamba_mic.data_modules.util.slice_inference import ConcatAdjacentSlicesToChannelsd
 
 
 class PICAIDataModule(pl.LightningDataModule):
@@ -56,11 +57,10 @@ class PICAIDataModule(pl.LightningDataModule):
                     spatial_size=[384, 384, 24],
                     mode=("area", "nearest"),
                 ),
-                T.ClipIntensityPercentilesd(
-                    keys="image", lower=None, upper=99, channel_wise=True
-                ),
+                T.ClipIntensityPercentilesd(keys="image", lower=None, upper=99, channel_wise=True),
                 T.NormalizeIntensityd(keys="image", channel_wise=True),
                 ConvertToBinaryLabeld(keys="label"),
+                ConcatAdjacentSlicesToChannelsd(keys="image", n_adjacent_slices=1),
             ]
         )
 
@@ -100,9 +100,7 @@ class PICAIDataModule(pl.LightningDataModule):
                     sigma_range=(5, 7),
                     mode=("bilinear", "nearest"),
                 ),
-                T.RandRotate90d(
-                    keys=["image", "label"], prob=0.5, max_k=3, spatial_axes=(0, 1)
-                ),
+                T.RandRotate90d(keys=["image", "label"], prob=0.5, max_k=3, spatial_axes=(0, 1)),
                 T.RandRotated(
                     keys=["image", "label"],
                     prob=0.4,
@@ -120,7 +118,7 @@ class PICAIDataModule(pl.LightningDataModule):
                     num_samples=1,
                     ratios=[0.6, 1],
                 ),
-            ]
+            ][:-1]
         )
 
         augment_intensity = T.Compose(
@@ -132,20 +130,12 @@ class PICAIDataModule(pl.LightningDataModule):
                     gamma=[0.7, 1.5],
                     retain_stats=True,
                 ),
-                T.RandScaleIntensityd(
-                    keys="image", prob=0.6, factors=0.1, channel_wise=True
-                ),
-                T.RandShiftIntensityd(
-                    keys="image", prob=0.5, offsets=0.1, channel_wise=True
-                ),
+                T.RandScaleIntensityd(keys="image", prob=0.6, factors=0.1, channel_wise=True),
+                T.RandShiftIntensityd(keys="image", prob=0.5, offsets=0.1, channel_wise=True),
             ]
         )
 
-        self.augment = (
-            augment
-            if augment is not None
-            else T.Compose([augment_spatial, augment_intensity])
-        )
+        self.augment = augment if augment is not None else T.Compose([augment_spatial, augment_intensity])
 
         self.train_subjects = None
         self.test_subjects = None
@@ -165,20 +155,12 @@ class PICAIDataModule(pl.LightningDataModule):
             raise RuntimeError("Mismatch between number of images and labels.")
 
         # Store subject dictionaries
-        self.subjects_with_ground_truth = [
-            {"image": img, "label": lbl} for img, lbl in zip(image_files, label_files)
-        ]
+        self.subjects_with_ground_truth = [{"image": img, "label": lbl} for img, lbl in zip(image_files, label_files)]
 
         self.human_expert_labels = [
-            s
-            for s in self.subjects_with_ground_truth
-            if np.any(T.LoadImage()(s["label"]) >= 2)
+            s for s in self.subjects_with_ground_truth if np.any(T.LoadImage()(s["label"]) >= 2)
         ]
-        self.ai_labels = [
-            s
-            for s in self.subjects_with_ground_truth
-            if np.any(T.LoadImage()(s["label"]) == 1)
-        ]
+        self.ai_labels = [s for s in self.subjects_with_ground_truth if np.any(T.LoadImage()(s["label"]) == 1)]
         print(f"Num AI labels: {len(self.ai_labels)}")
         print(f"Num Human expert labels: {len(self.human_expert_labels)}")
 
@@ -247,13 +229,15 @@ class ConvertToMultiChanneld(T.MapTransform):
                     (label == 5).float(),  # Class 5
                 ]
 
-                d[key] = torch.stack(
-                    result, axis=0
-                ).squeeze()  # Stack along channel axis
+                d[key] = torch.stack(result, axis=0).squeeze()  # Stack along channel axis
         return d
 
 
 class ConvertToBinaryLabeld(T.MapTransform):
+    def __init__(self, keys, classification=False):
+        super().__init__(keys)
+        self.classification = classification
+
     def __call__(self, data):
         d = dict(data)
         for key in self.keys:
@@ -262,5 +246,8 @@ class ConvertToBinaryLabeld(T.MapTransform):
 
                 # Convert to binary: 0 for ISUP ≤1, 1 for ISUP ≥2
                 d[key] = (label >= 1).float()
+
+                if self.classification:
+                    d[key] = torch.any(d[key] > 0).int()
 
         return d

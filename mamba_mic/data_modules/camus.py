@@ -200,8 +200,8 @@ class CAMUSDataModule(pl.LightningDataModule):
         patient_id = meta["patient_id"]
         view = meta["view"]
 
-        pred_ed = sample["pred_ed"].squeeze(0).argmax(dim=0).float().cpu().numpy()
-        pred_es = sample["pred_es"].squeeze(0).argmax(dim=0).float().cpu().numpy()
+        pred_ed = sample["pred_ed"].squeeze().float().cpu().numpy()
+        pred_es = sample["pred_es"].squeeze().float().cpu().numpy()
 
         pred_ed_resized = resize_image(pred_ed, size)
         pred_es_resized = resize_image(pred_es, size)

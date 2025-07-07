@@ -103,6 +103,8 @@ class Stem(nn.Module):
         self.patch_size = patch_size
         self.patches_resolution = patches_resolution
         self.num_patches = patches_resolution[0] * patches_resolution[1]
+        print(f"Num patches: {self.num_patches}")
+        print(f"Patches resolution: {self.patches_resolution}")
 
         self.in_chans = in_chans
         self.embed_dim = embed_dim
@@ -173,11 +175,14 @@ class SimpleStem(nn.Module):
         self.patches_resolution = patches_resolution
         self.num_patches = patches_resolution[0] * patches_resolution[1]
 
+        print(f"Patches resolution: {self.patches_resolution}")
+        print(f"Num patches: {self.num_patches}")
+
         self.in_chans = in_chans
         self.embed_dim = embed_dim
         self.norm = nn.LayerNorm(embed_dim)
         self.conv1 = ConvLayer(
-            in_chans, embed_dim, kernel_size=4, stride=4, padding=0, bias=False
+            in_chans, embed_dim, kernel_size=patch_size[0], stride=patch_size[0], padding=0, bias=False
         )
 
     def forward(self, x):

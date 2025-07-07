@@ -4,7 +4,7 @@ init_args:
   criterion:
     class_path: monai.losses.FocalLoss
     init_args:
-      gamma: 1.0
+      gamma: 2.0
   net:
     class_path: monai.networks.nets.dynunet.DynUNet
     init_args:

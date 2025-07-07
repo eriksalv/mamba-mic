@@ -69,7 +69,11 @@ class StandardAttention(nn.Module):
     def forward(self, x, H, W):
         qkv = self.to_qkv(x).chunk(3, dim=-1)
         q, k, v = map(lambda t: rearrange(t, "b n (h d) -> b h n d", h=self.heads), qkv)
+        # print(f"{q.shape=}")
+        # print(f"{k.shape=}")
+        # print(f"{v.shape=}")
         dots = torch.einsum("bhid,bhjd->bhij", q, k) * self.scale
+        # print(dots.shape)
         attn = dots.softmax(dim=-1)
         attn = self.dropout(attn)
         out = torch.einsum("bhij,bhjd->bhid", attn, v)
@@ -198,6 +202,7 @@ class Mamba2(nn.Module):
         """
 
         batch, seqlen, head, dim = x.shape
+        # print(f"batch, seqlen, head, dim = {x.shape}")
         dstate = B.shape[2]
         V = x.permute(0, 2, 1, 3)  # (B, H, L, D)
         dt = dt.permute(0, 2, 1)  # (B, H, L)
@@ -224,6 +229,7 @@ class Mamba2(nn.Module):
         if self.ngroups == 1:
             ## get kv via transpose K and V
             KV = K.transpose(-2, -1) @ V_scaled  # (B, H, dstate, D)
+            # print(f"KV.shape{KV.shape=}")
             Q = C.view(batch, 1, seqlen, dstate)  # .repeat(1, head, 1, 1)
             x = Q @ KV  # (B, H, L, D)
             x = x + V * D.view(1, -1, 1, 1).repeat(batch, 1, seqlen, 1)
@@ -575,6 +581,8 @@ class VMAMBA2(nn.Module):
         patches_resolution = self.patch_embed.patches_resolution
         self.patches_resolution = patches_resolution
 
+        # print(self.patches_resolution)
+
         self.pos_drop = nn.Dropout(p=drop_rate)
 
         # stochastic depth
@@ -653,9 +661,9 @@ class VMAMBA2(nn.Module):
         return sum(Gflops.values()) * 1e9
 
     def forward_features(self, x):
-        H, W = x.shape[-2:]
         x = self.patch_embed(x)
-        H, W = H // 4, W // 4  # downsampled by patch_embed
+        H, W = self.patches_resolution
+        # print(H, W)
 
         x = self.pos_drop(x)
         for layer in self.layers:
@@ -712,12 +720,16 @@ class Backbone_VMAMBA2(VMAMBA2):
             return x, y
 
         H, W = x.shape[-2:]
+        # print(f"Before: {x.shape=}")
         x = self.patch_embed(x)
-        if self.simple_patch_embed:
-            H, W = H // 4, W // 4
-        else:
-            H, W = int((H - 1) / 2) + 1, int((W - 1) / 2) + 1
-            H, W = int((H - 1) / 2) + 1, int((W - 1) / 2) + 1
+        # print(f"After: {x.shape=}")
+        H, W = self.patches_resolution
+        # print(f"{H=}, {W=}")
+        # if self.simple_patch_embed:
+        #     H, W = H // 4, W // 4
+        # else:
+        #     H, W = int((H - 1) / 2) + 1, int((W - 1) / 2) + 1
+        #     H, W = int((H - 1) / 2) + 1, int((W - 1) / 2) + 1
         outs = []
         for i, layer in enumerate(self.layers):
             o, x = layer_forward(layer, x, H, W)  # (B, H, W, C)
@@ -737,3 +749,33 @@ class Backbone_VMAMBA2(VMAMBA2):
 
 
 Backbone_VSSD: nn.Module = Backbone_VMAMBA2
+
+
+# class USSD(nn.Module):
+#     def __init__(
+#         self,
+#         img_size=224,
+#         patch_size=4,
+#         in_chans=3,
+#         num_classes=1,
+#         embed_dim=64,
+#         depths=[2, 2, 9, 2],
+#         num_heads=[2, 4, 8, 16],
+#         mlp_ratio=4.0,
+#         qkv_bias=True,
+#         drop_rate=0.0,
+#         drop_path_rate=0.2,
+#         norm_layer: Type[nn.Module] = nn.LayerNorm,
+#         use_checkpoint=False,
+#         ssd_expansion=2,
+#         ssd_ngroups=1,
+#         ssd_chunk_size=256,
+#         linear_attn_duality=True,
+#         d_state=64,
+#         **kwargs,
+#     ):
+#         super().__init__()
+#         self.conv = nn.Conv2d(in_channels, out_channels, kernel_size, stride, padding)
+
+#     def forward(self, x):
+#         return self.conv(x)

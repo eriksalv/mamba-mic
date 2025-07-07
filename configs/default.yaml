@@ -1,5 +1,5 @@
 wandb:
-  project: brats2024
+  project: picaiV2
   name: example
   watch_model: false
   group: null

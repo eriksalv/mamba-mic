@@ -87,7 +87,7 @@ class FinalPatchExpand_X4(nn.Module):
         # self.input_resolution = input_resolution
         self.dim = dim
         self.dim_scale = dim_scale
-        self.expand = nn.Linear(dim, 16 * dim, bias=False)
+        self.expand = nn.Linear(dim, dim_scale**2 * dim, bias=False)
         self.output_dim = dim
         self.norm = norm_layer(self.output_dim)
 
@@ -671,6 +671,7 @@ class UNetResDecoder(nn.Module):
         features_per_stage: Union[Tuple[int, ...], List[int]] = None,
         drop_path_rate: float = 0.2,
         d_state: int = 16,
+        patch_size=4
     ):
         """
         This class needs the skips of the encoder as input in its forward.
@@ -694,6 +695,8 @@ class UNetResDecoder(nn.Module):
         # self.encoder = encoder
         self.num_classes = num_classes
         n_stages_encoder = len(encoder_output_channels)
+
+        self.patch_size = patch_size
 
         dpr = [
             x.item()
@@ -749,7 +752,7 @@ class UNetResDecoder(nn.Module):
             FinalPatchExpand_X4(
                 input_resolution=None,
                 dim=encoder_output_channels[0],
-                dim_scale=4,
+                dim_scale=self.patch_size,
                 norm_layer=nn.LayerNorm,
             )
         )

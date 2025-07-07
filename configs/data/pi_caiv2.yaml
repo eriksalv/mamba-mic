@@ -1,7 +1,7 @@
 class_path: mamba_mic.data_modules.pi_caiv2.PICAIV2DataModule
 init_args:
   batch_size: 4
-  num_workers: 20
+  num_workers: 16
   cache_rate: 1
   filter_empty_labels_for_training: false
   include_empty_eval: true
@@ -46,11 +46,11 @@ init_args:
         - class_path: monai.transforms.CenterSpatialCropd
           init_args:
             keys: ["image", "label"]
-            roi_size: [384, 384, 24]
+            roi_size: [384, 384, 21]
         - class_path: monai.transforms.Resized
           init_args:
             keys: ["image", "label"]
-            spatial_size: [384, 384, 24]
+            spatial_size: [384, 384, 21]
             mode: ["area", "nearest"]
         - class_path: monai.transforms.ClipIntensityPercentilesd
           init_args:
@@ -65,10 +65,10 @@ init_args:
         - class_path: mamba_mic.data_modules.pi_cai.ConvertToBinaryLabeld
           init_args:
             keys: label
-        # - class_path: mamba_mic.data_modules.util.slice_inference.ConcatAdjacentSlicesToChannelsd
-        #   init_args:
-        #     keys: image
-        #     n_adjacent_slices: 1
+        - class_path: data_modules.util.slice_inference.ConcatAdjacentSlicesToChannelsd
+          init_args:
+            keys: image
+            n_adjacent_slices: 1
   augment:
     class_path: monai.transforms.Compose
     init_args:
@@ -98,7 +98,7 @@ init_args:
         - class_path: monai.transforms.RandRotate90d
           init_args:
             keys: ["image", "label"]
-            prob: 0.67
+            prob: 0.5
             max_k: 3
             spatial_axes: [0, 1]
         - class_path: monai.transforms.RandRotated
@@ -117,14 +117,14 @@ init_args:
             max_zoom: 1.1
             mode: ["area", "nearest"]
             keep_size: true
-        - class_path: monai.transforms.RandCropByLabelClassesd
-          init_args:
-            keys: ["image", "label"]
-            label_key: label
-            spatial_size: [256, 256, 24]
-            num_classes: 2
-            num_samples: 1
-            ratios: [1, 1]
+        # - class_path: monai.transforms.RandCropByLabelClassesd
+        #   init_args:
+        #     keys: ["image", "label"]
+        #     label_key: label
+        #     spatial_size: [256, 256, 24]
+        #     num_classes: 2
+        #     num_samples: 1
+        #     ratios: [1, 1]
         - class_path: monai.transforms.RandGaussianNoised
           init_args:
             keys: image

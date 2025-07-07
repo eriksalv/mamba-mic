@@ -8,15 +8,10 @@ from monai.metrics import (
 from monai.inferers import Inferer, SliceInferer
 from monai.transforms import Compose, Activations, AsDiscrete
 from monai.losses.dice import FocalLoss
-from picai_eval.eval import evaluate_case
-from report_guided_annotation import extract_lesion_candidates
 from torch.nn.modules.loss import _Loss
-import wandb
-
-from mamba_mic.data_modules.pi_caiv2 import PICAIV2DataModule, evaluate_cases
 
 
-class System(pl.LightningModule):
+class BaseModule(pl.LightningModule):
     def __init__(
         self,
         net: torch.nn.Module,
@@ -44,10 +39,16 @@ class System(pl.LightningModule):
             num_output_channels is not None and softmax is True
         ), "num_output_channels should only be set if softmax is True"
 
-        self.criterion = criterion if criterion else FocalLoss(include_background=include_background, gamma=2)
+        self.criterion = (
+            criterion
+            if criterion
+            else FocalLoss(include_background=include_background, gamma=2)
+        )
 
         self.metrics = {
-            "dice": DiceMetric(include_background=include_background, reduction="mean_batch"),
+            "dice": DiceMetric(
+                include_background=include_background, reduction="mean_batch"
+            ),
             "hd95": HausdorffDistanceMetric(
                 include_background=include_background,
                 distance_metric="euclidean",
@@ -59,7 +60,6 @@ class System(pl.LightningModule):
                 reduction="mean_batch",
             ),
         }
-        self.extra_metrics = {"picai": []}
 
         self.post_pred = (
             Compose([AsDiscrete(argmax=True, dim=1, to_onehot=num_output_channels)])
@@ -74,7 +74,11 @@ class System(pl.LightningModule):
 
         self.do_slice_inference = do_slice_inference
         if do_slice_inference:
-            assert slice_dim is not None and slice_shape is not None and slice_batch_size is not None, (
+            assert (
+                slice_dim is not None
+                and slice_shape is not None
+                and slice_batch_size is not None
+            ), (
                 "slice_dim, slice_shape and slice_batch_size must be specified if do_slice_inference is True"
             )
             self.slice_inferer = SliceInferer(
@@ -122,29 +126,24 @@ class System(pl.LightningModule):
         batch["label"] = batch["label"].squeeze(0)
         batch["pred"] = Activations(sigmoid=True, softmax=False)(y_hat).squeeze(0)
 
-        if isinstance(self.trainer.datamodule, PICAIV2DataModule):
-            _eval = evaluate_case(
-                y_true=batch["label"].squeeze().cpu().numpy(),
-                y_det=batch["pred"].squeeze().cpu().numpy(),
-                y_det_postprocess_func=lambda pred: extract_lesion_candidates(pred)[0],
-            )
-            self.extra_metrics["picai"].append(_eval)
-
-        if self.trainer.state.fn in ["validate", "test", "predict"] and self.save_output:
+        if (
+            self.trainer.state.fn in ["validate", "test", "predict"]
+            and self.save_output
+        ):
             self.trainer.datamodule.invert_and_save(batch)
 
         for metric in self.metrics.values():
             metric(y_hat_binarized, y)
 
-        return loss
+        return loss, batch
 
     def validation_step(self, batch, batch_idx):
-        loss = self._shared_eval_step(batch, batch_idx)
+        loss, _ = self._shared_eval_step(batch, batch_idx)
         self.log("val_loss", loss, sync_dist=True)
         return {"val_loss": loss}
 
     def test_step(self, batch, batch_idx):
-        loss = self._shared_eval_step(batch, batch_idx)
+        loss, _ = self._shared_eval_step(batch, batch_idx)
         self.log("test_loss", loss, sync_dist=True)
         return {"test_loss": loss}
 
@@ -164,9 +163,6 @@ class System(pl.LightningModule):
                 metrics[f"{stage}_{name}"] = per_channel.mean()
                 metric.reset()
 
-        if isinstance(self.trainer.datamodule, PICAIV2DataModule):
-            metrics |= self.log_picai_metrics(stage)
-
         self.log_dict(metrics, sync_dist=True)
 
     def on_validation_epoch_end(self):
@@ -178,21 +174,3 @@ class System(pl.LightningModule):
     def configure_optimizers(self):
         optimizer = torch.optim.AdamW(self.parameters(), lr=self.lr)
         return optimizer
-
-    def log_picai_metrics(self, stage):
-        picai_metrics = evaluate_cases(self.extra_metrics["picai"])
-        self.extra_metrics["picai"] = []
-
-        roc_data = [[fpr, tpr] for (fpr, tpr) in zip(picai_metrics.case_FPR, picai_metrics.case_TPR)]
-        pr_data = [[recall, precision] for (recall, precision) in zip(picai_metrics.recall, picai_metrics.precision)]
-        roc_table = wandb.Table(data=roc_data, columns=["FPR", "TPR"])
-        pr_table = wandb.Table(data=pr_data, columns=["Recall", "Precision"])
-
-        wandb.log({f"{stage}/ROC": wandb.plot.line(roc_table, "FPR", "TPR", title="ROC")})
-        wandb.log({f"{stage}/PR": wandb.plot.line(pr_table, "Recall", "Precision", title="PR")})
-
-        return {
-            "AP": picai_metrics.AP,
-            "AUROC": picai_metrics.auroc,
-            "PICAI-Score": picai_metrics.score,
-        }
