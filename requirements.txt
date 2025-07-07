@@ -22,3 +22,7 @@ fvcore
 SimpleITK
 picai_eval
 report_guided_annotation
+pandas
+scipy
+scikit-image
+opencv-python

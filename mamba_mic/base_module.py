@@ -1,13 +1,15 @@
-import torch
+import random
+
 import lightning.pytorch as pl
+import torch
+from monai.inferers import Inferer, SliceInferer
+from monai.losses.dice import DiceCELoss, FocalLoss
 from monai.metrics import (
+    ConfusionMatrixMetric,
     DiceMetric,
     HausdorffDistanceMetric,
-    ConfusionMatrixMetric,
 )
-from monai.inferers import Inferer, SliceInferer
-from monai.transforms import Compose, Activations, AsDiscrete
-from monai.losses.dice import FocalLoss
+from monai.transforms import Activations, AsDiscrete, Compose
 from torch.nn.modules.loss import _Loss
 
 
@@ -35,20 +37,14 @@ class BaseModule(pl.LightningModule):
         self.save_output = save_output
         self.val_inferer = val_inferer
 
+        self.criterion = criterion if criterion else FocalLoss(include_background=include_background, gamma=2)
+
         assert (num_output_channels is None and softmax is False) or (
             num_output_channels is not None and softmax is True
         ), "num_output_channels should only be set if softmax is True"
 
-        self.criterion = (
-            criterion
-            if criterion
-            else FocalLoss(include_background=include_background, gamma=2)
-        )
-
         self.metrics = {
-            "dice": DiceMetric(
-                include_background=include_background, reduction="mean_batch"
-            ),
+            "dice": DiceMetric(include_background=include_background, reduction="mean_batch"),
             "hd95": HausdorffDistanceMetric(
                 include_background=include_background,
                 distance_metric="euclidean",
@@ -74,11 +70,7 @@ class BaseModule(pl.LightningModule):
 
         self.do_slice_inference = do_slice_inference
         if do_slice_inference:
-            assert (
-                slice_dim is not None
-                and slice_shape is not None
-                and slice_batch_size is not None
-            ), (
+            assert slice_dim is not None and slice_shape is not None and slice_batch_size is not None, (
                 "slice_dim, slice_shape and slice_batch_size must be specified if do_slice_inference is True"
             )
             self.slice_inferer = SliceInferer(
@@ -126,10 +118,7 @@ class BaseModule(pl.LightningModule):
         batch["label"] = batch["label"].squeeze(0)
         batch["pred"] = Activations(sigmoid=True, softmax=False)(y_hat).squeeze(0)
 
-        if (
-            self.trainer.state.fn in ["validate", "test", "predict"]
-            and self.save_output
-        ):
+        if self.trainer.state.fn in ["validate", "test", "predict"] and self.save_output:
             self.trainer.datamodule.invert_and_save(batch)
 
         for metric in self.metrics.values():
@@ -149,6 +138,7 @@ class BaseModule(pl.LightningModule):
 
     def _shared_on_epoch_end(self, stage="val"):
         metrics = {}
+
         for name, metric in self.metrics.items():
             per_channel = metric.aggregate()
 
